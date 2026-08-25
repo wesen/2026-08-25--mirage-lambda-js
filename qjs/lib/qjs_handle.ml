@@ -3,11 +3,29 @@
    to reject stale use-after-free. Explicit [destroy] is required (in
    Lwt.finalize); the finalizer is only a last-resort leak guard. *)
 
-type t = private int   (* (generation << 32) lor index — opaque to OCaml *)
+type t = int   (* (generation << 16) lor index — opaque to OCaml *)
 
 external create : limits_blob:bytes -> t = "mlqjs_create"
 external destroy : t -> unit = "mlqjs_destroy"
 
-(* The externals are implemented in qjs/c/qjs_stubs.c. Until QuickJS is
-   vendored (Phase 2 gate), every primitive fails at runtime with a clear
-   message; the handle type and interface are pinned here. *)
+(* Eval a source string; returns true if the eval threw a JS exception. *)
+external eval : t -> string -> bool = "mlqjs_eval"
+
+(* Eval a source expression that should produce an int; returns the int.
+   Raises (Failure) on exception or non-int. *)
+external eval_int : t -> string -> int = "mlqjs_eval_int"
+
+(* Run up to max_jobs pending QuickJS jobs. Returns:
+   0 = nothing pending (Waiting), 1 = ran jobs, 2 = interrupted. *)
+external pump : t -> max_jobs:int -> int = "mlqjs_pump"
+
+external cancel : t -> reason:int -> unit = "mlqjs_cancel"
+
+(* Drain the host request queue into an array of (id, op, payload). *)
+external take_requests : t -> (int64 * string * string) array = "mlqjs_take_requests"
+
+(* Diagnostic: live host request count. *)
+external host_call_count : t -> int = "mlqjs_host_call_count"
+
+(* Memory usage: (used_count, limit, pending_jobs). *)
+external mem_usage : t -> (int * int * int) = "mlqjs_mem_usage"

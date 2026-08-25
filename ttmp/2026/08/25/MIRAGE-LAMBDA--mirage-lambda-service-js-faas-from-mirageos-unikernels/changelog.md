@@ -40,3 +40,12 @@ Vendored QuickJS 2026-06-04 (SHA-256 b376e839...); engine core compiles under AS
 
 - /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/qjs/vendor/VENDOR.md — Vendor provenance + digest
 
+
+## 2026-08-25
+
+Phase 2 real engine: QuickJS lifecycle wired (create/eval/limits/interrupt/pump) + 8 engine tests; 29 tests green; §34.2 steps 1,2,6,7,8,11 proven on Unix
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/qjs/c/qjs_stubs.c — Real QuickJS engine FFI lifecycle
+

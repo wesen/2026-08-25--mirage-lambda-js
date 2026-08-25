@@ -5,7 +5,10 @@
  (libraries mirage_lambda.common)
  (foreign_stubs
   (language c)
-  (include_dirs ../c)
-  (names qjs_stubs qjs_port_unix))
+  (include_dirs ../c ../vendor/quickjs-2026-06-04)
+  (names qjs_stubs qjs_port_unix qjs_allocator qjs_host_queue
+        _qjs_quickjs _qjs_cutils _qjs_dtoa _qjs_libregexp _qjs_libunicode)
+  (flags (:standard -fPIC "-DCONFIG_VERSION=\"2026-06-04\"" -DCONFIG_ATOMICS -DCONFIG_STACK_CHECK)))
+ (c_library_flags (-lm))
  (modules qjs_handle qjs_engine qjs_module_loader qjs_host_request)
  (flags (:standard -w -27-32-34-50-69-70)))

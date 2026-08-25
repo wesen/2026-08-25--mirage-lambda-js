@@ -30,7 +30,7 @@ module Memory : sig
   }
   val make :
     heap_used:int -> heap_limit:int -> atom_count:int ->
-    pending_jobs:int -> live_headers:int -> unit -> t
+    pending_jobs:int -> live_handles:int -> unit -> t
   val heap_used : t -> int
   val heap_limit : t -> int
   val atom_count : t -> int
@@ -46,6 +46,12 @@ val create :
 val start :
   t -> entrypoint:Ids.Module_path.t -> export_name:string ->
   event_json:Bounded_bytes.t -> context_json:Bounded_bytes.t -> (unit, error) result
+
+(** Eval a source string; returns true if a JS exception was thrown. *)
+val eval : t -> string -> bool
+
+(** Eval an int expression; returns the int or an engine error. *)
+val eval_int : t -> string -> (int, error) result
 
 val take_host_requests : t -> Qjs_host_request.t list
 

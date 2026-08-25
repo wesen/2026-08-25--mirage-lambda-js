@@ -7,3 +7,8 @@
  (name test_qjs)
  (libraries mirage_lambda.qjs alcotest)
  (modules test_qjs))
+
+(test
+ (name test_qjs_engine)
+ (libraries mirage_lambda.qjs alcotest)
+ (modules test_qjs_engine))

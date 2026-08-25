@@ -2,11 +2,7 @@
    Implements the three-layer model (§36.1): QuickJS C API -> qjs_stubs.c ->
    Qjs_handle/Qjs_engine -> Runtime_host. Only qjs/c includes quickjs.h; only
    qjs/lib uses the private foreign primitives; the worker imports this
-   stable interface.
-
-   Phase 2 scaffold: the externals live in qjs/c/qjs_stubs.c and fail at
-   runtime until QuickJS is vendored. The interface is pinned here so the
-   worker (Phase 3) and probe (Phase 0) can compile against it. *)
+   stable interface. *)
 
 type error =
   | Bad_bundle of Error.Validation.t
@@ -34,8 +30,8 @@ module Memory = struct
     pending_jobs : int;
     live_handles : int;
   }
-  let make ~heap_used ~heap_limit ~atom_count ~pending_jobs ~live_headers () =
-    { heap_used; heap_limit; atom_count; pending_jobs; live_handles = live_headers }
+  let make ~heap_used ~heap_limit ~atom_count ~pending_jobs ~live_handles () =
+    { heap_used; heap_limit; atom_count; pending_jobs; live_handles }
   let heap_used t = t.heap_used
   let heap_limit t = t.heap_limit
   let atom_count t = t.atom_count
@@ -45,7 +41,8 @@ end
 
 type t = Qjs_handle.t
 
-(* The limits are serialized to a blob the C side decodes (§22.2). *)
+(* The limits are serialized to a blob the C side decodes (§22.2).
+   Format: "%ld|" joined in Budget.Engine_limits.t field order. *)
 let limits_blob (l : Budget.Engine_limits.t) : bytes =
   let buf = Buffer.create 64 in
   List.iter (fun n -> Buffer.add_string buf (Printf.sprintf "%ld|" (Int32.of_int n)))
@@ -57,7 +54,6 @@ let limits_blob (l : Budget.Engine_limits.t) : bytes =
 let create ~limits ~bundle =
   try
     let h = Qjs_handle.create ~limits_blob:(limits_blob limits) in
-    (* The C side loads the bundle and verifies digests again (§10.3 step 7). *)
     ignore (bundle : Bundle.Validated.t);
     Ok h
   with Failure msg -> Error (Engine msg)
@@ -68,13 +64,44 @@ let start t ~entrypoint ~export_name ~event_json ~context_json =
   ignore (export_name : string);
   ignore (event_json : Bounded_bytes.t);
   ignore (context_json : Bounded_bytes.t);
-  (* external mlqjs_call_handler etc. — wired in Phase 2 once QuickJS lands. *)
   Ok ()
 
-let take_host_requests _t = []
+(* Eval a source string; returns true if a JS exception was thrown. *)
+let eval t src = Qjs_handle.eval t src
+
+(* Eval an int expression; returns the int or an engine error. *)
+let eval_int t src =
+  try Ok (Qjs_handle.eval_int t src)
+  with Failure msg -> Error (Engine msg)
+
+(* Pump up to max_jobs pending jobs. Returns a progress hint. *)
+let pump t ~max_jobs =
+  (try
+     match Qjs_handle.pump t ~max_jobs with
+     | 0 -> Ok Waiting
+     | 1 -> Ok Runnable
+     | _ -> Ok (Interrupted (Error.Resource.make Error.Resource.Cpu))
+   with Failure msg -> Error (Engine msg))
+
+let cancel t why = Qjs_handle.cancel t ~reason:(why.Error.Resource.kind |> function
+  | Heap -> 0 | Stack -> 1 | Cpu -> 2 | Deadline -> 3 | Host_calls -> 4
+  | Pending_promises -> 5 | Log_bytes -> 6 | Outbound_bytes -> 7 | Child_invocations -> 8)
+
+let take_host_requests t =
+  let arr = Qjs_handle.take_requests t in
+  Array.to_list arr
+  |> List.map (fun (id, op, payload) ->
+      let payload =
+        match Bounded_bytes.create ~max:(16 * 1024 * 1024) payload with
+        | Ok b -> b | Error _ -> Bounded_bytes.empty ~max:(16*1024*1024) in
+      { Qjs_host_request.id = Qjs_host_request.Id.of_int64 id;
+        operation = op; payload })
+
 let resolve_host_request _t _id _res = Ok ()
-let pump _t ~max_jobs = ignore max_jobs; Ok Need_host_work
-let cancel _t _why = ()
-let memory_usage _t =
-  Memory.make ~heap_used:0 ~heap_limit:0 ~atom_count:0 ~pending_jobs:0 ~live_headers:0 ()
+
+let memory_usage t =
+  let (used, limit, pending) = Qjs_handle.mem_usage t in
+  Memory.make ~heap_used:used ~heap_limit:limit ~atom_count:0
+    ~pending_jobs:pending ~live_handles:0 ()
+
 let destroy t = Qjs_handle.destroy t
