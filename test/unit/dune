@@ -1,0 +1,4 @@
+(test
+ (name test_common)
+ (libraries mirage_lambda.common yojson alcotest)
+ (modules test_common))

@@ -10,6 +10,8 @@ DocType: reference
 Intent: long-term
 Owners: []
 RelatedFiles:
+    - Path: repo://common/manifest.ml
+      Note: Strict manifest parser (§10.2/§10.3)
     - Path: repo://qjs/c/qjs_port.h
       Note: Freestanding platform boundary contract
     - Path: repo://scripts/build-unix-probe.sh
@@ -20,6 +22,7 @@ LastUpdated: 2026-08-25T17:20:00-04:00
 WhatFor: Recording what changed, why, what worked/failed, and how to review each phase.
 WhenToUse: Read before resuming work on MIRAGE-LAMBDA to recover context.
 ---
+
 
 
 
@@ -148,3 +151,83 @@ Phase 0 is the gate that separates language-runtime uncertainty from architectur
 ### Technical details
 - dune 3.19.1, OCaml 4.14.2, opam 2.5.2, gcc 13.3.0.
 - Boundary object: `build/probe/qjs_port_unix.o`, sanitizer build with `-O1 -g3 -fno-omit-frame-pointer -fsanitize=address,undefined`.
+
+## Step 2: Phase 1 — Domain model, schemas, and pure common library (complete)
+
+This step implements the entire pure `common/` library — identifiers, bounded
+bytes, the stable error taxonomy, resource arithmetic, the capability system,
+the strict manifest parser, the MLB1 bundle parser/writer (with a pure-OCaml
+SHA-256), the internal protocol, and canonical JSON — plus property tests,
+a crowbar fuzz harness, and the `api/` JSON Schema / OpenAPI fixtures. The
+library has no Unix/Lwt/Mirage/TLS/QuickJS dependency, so it builds and tests
+on the plain OCaml switch. All 14 alcotest tests and 3 crowbar fuzz tests pass.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 0)
+
+**Assistant interpretation:** Implement Phase 1 of the guide: the pure common library, schemas, property tests, and fuzz harness.
+
+**Inferred user intent:** A tested, dependency-free foundation that every later phase (worker, control plane, CLI) imports.
+
+### What I did
+- `common/canonical_json.{ml,mli}`: deterministic JSON with recursively sorted keys, fixed float repr, no whitespace.
+- `common/error.{ml,mli}`: `Validation`, `Resource`, `Js`, `Host` modules; `failure_class` (§18.1) + stable `code` (§9.5) with HTTP status; top-level `Error.t` with request id + retryable.
+- `common/bounded_bytes.{ml,mli}`: bound-checked byte strings; `create`/`append`/`sub` return `Payload_too_large` on overflow.
+- `common/ids.{ml,mli}`: `Slug` functor for `Function_name`/`Tenant_id`/`Alias`/`Store_id`/`Log_stream`/`Qualifier`; separate `Binding_name` (JS-identifier, camelCase); `Digest` (64 hex + constant-time equal); `Key_prefix` (allows single trailing slash); `Module_path` (§10.4/§10.5); `Revision_id`.
+- `common/budget.{ml,mli}`: `Engine_limits` + `Usage` with saturating counters; `take_*`/`release_*` never underflow; `deadline_expired`.
+- `common/capability.{ml,mli}`: `operation`, `grant`, `policy`, `declarations`; `compile`; `intersection` (§F.1 — never grants more than either operand); `grants`; `Http_policy`, `Secret_policy`, `Function_ref`, `Operation_limits`.
+- `common/manifest.{ml,mli}`: strict Yojson parser; rejects unknown + duplicate fields; validates ids/limits/capabilities; ordered cheapest→most expensive (§10.3).
+- `common/bundle.{ml,mli}`: MLB1 parser/writer + inline `Sha256` (pure OCaml); bounds/overflow checks, path validation, sorted+unique modules, per-module + footer digest verification with constant-time compare, size caps.
+- `common/protocol.{ml,mli}`: `Worker_id`/`Invocation_id`/`Lease_id`; `invocation_envelope`, `assignment`, `metering`, `completion`, `completion_envelope`, `start_handshake`; all carry `protocol_version`; `check_version`.
+- `test/unit/test_common.ml` + `dune`: 14 alcotest tests incl. property tests (slug roundtrip, budget no-underflow, capability intersection invariant).
+- `test/fuzz/fuzz_common.ml` + `dune`: 3 crowbar tests (no-crash on arbitrary bytes for bundle/manifest; bundle write/parse roundtrip).
+- `api/function-manifest.schema.json`, `api/invocation-envelope.schema.json`, `api/openapi.yaml`, `api/worker-protocol.md`.
+
+### Why
+Phase 1 is the dependency-free foundation everything imports (§35.1). Pure code is fuzzable and reusable by CLI/control/worker/tests (§35.1).
+
+### What worked
+- `dune runtest --force`: 14/14 alcotest tests pass; 3/3 crowbar fuzz tests pass.
+- The bundle write→parse roundtrip preserves content and verifies digests; truncation and a flipped footer byte are both rejected.
+- Capability intersection correctly grants `Kv_get` (in both) but not `Kv_put` (only one operand), proving the §F.1 invariant.
+
+### What didn't work
+- `let*` (Result bind) is NOT in scope from `open Result` in OCaml 4.14.2 stdlib; had to `let (let*) = Result.bind` per file.
+- Record-field punning resolved to the record *accessors* (e.g. `Validated.modules`) instead of local `let` variables; renamed locals to `mods`/`manifest_v` and used explicit `field = value`.
+- `Result.of_string`/field-access precedence (`f m.path` parsed as `(f m).path`); parenthesized or annotated lambda params.
+- `Key_prefix.of_string "tenant-a/"` rejected the trailing slash (empty segment); fixed to allow a single trailing slash.
+- `Binding_name` used the strict slug policy, but the guide's manifest uses camelCase bindings ("metadataApi"); gave `Binding_name` a JS-identifier validator.
+- Invoke bindings derived from hyphenated function names ("resize-helper") failed the JS-identifier check; map `-`→`_`.
+- opam-file name had to match the package name (`mirage_lambda.opam`), and the package stanza needed `(allow_empty)` for a Phase-0 project with no library stanzas; later added the real library.
+- `qcheck`/`crowbar` API friction (no `QCheck.elements`, `QCheck_alcotest` package absent); used a seeded-Random property helper inside alcotest and `Crowbar.add_test [Crowbar.bytes]` directly.
+
+### What I learned
+- The freestanding platform boundary (Phase 0) and the pure common library (Phase 1) are cleanly decoupled — Phase 1 needs only `yojson` + the test stack.
+- Record-field disambiguation in `wrapped false` libraries bites when accessors share names with intended locals; explicit field assignment is the reliable fix.
+- The guide's manifest example (§10.2) intentionally uses camelCase bindings and hyphenated function names, so the identifier policies must differ per type.
+
+### What was tricky to build
+- Keeping the bundle parser total on arbitrary bytes: every `String.sub`/`read_u16`/`read_u32` is bounds-checked with `Int64` arithmetic to avoid overflow, and the footer offset is asserted to be exactly `len - 32`. A mutable offset ref inside a `let*` chain needed `let () = off := !off + N in` sequencing (not `let* x = e in off := .. in ..`).
+- Unifying error types in `Bundle.parse`: it mixes `Error.t` (public) and `Error.Validation.t`/`string` (sub-parsers); added `validation_err`/`invalid` converters so `parse` returns a uniform `(Validated.t, Error.t) result`.
+- Faithful strict manifest parsing with duplicate + unknown field detection using Yojson's assoc lists (Yojson preserves duplicate keys).
+
+### What warrants a second pair of eyes
+- The pure-OCaml SHA-256 in `bundle.ml` is hand-written; verify against NIST vectors / `mirage-crypto` in Phase 2 before relying on it for real digests.
+- `Canonical_json` float representation is not RFC 8785 (§canonical_json limitation); fine for the manifest/bundle (mostly strings/ints) but must be hardened before floats cross a digest boundary.
+- The `Http_policy` equality in `op_equal` is structural; Phase 8 must harden egress (§16).
+- `Binding_name` allows `_`-start and arbitrary camelCase; confirm this matches the intended JS API surface in Phase 3.
+
+### What should be done in the future
+- Validate `canonical_json` against RFC 8785 floats; add NIST SHA-256 vectors to the bundle tests.
+- Add a `common/` cross-compile check for the target switch (§35.4: no accidental Unix deps) — currently only Unix-verified.
+- Phase 2: implement `qjs/lib/qjs_engine.mli` to match the §20.1 interface the probe references.
+
+### Code review instructions
+- Start at `common/` `.mli` files (the public contracts) and `test/unit/test_common.ml`.
+- Run `eval $(opam env) && dune build && dune runtest --force` — expect 14 unit + 3 fuzz passing.
+- Check the §35.3 properties: `decode(encode(x))=x`, budget no-underflow, capability intersection subset, bundle parser consumes exact lengths, manifest rejects unknown fields.
+
+### Technical details
+- Switch `CP.2025.08.0~8.20~2025.01`, OCaml 4.14.2, dune 3.19.1, yojson 2.2.2, alcotest 1.9.1, qcheck 0.91, crowbar (installed).
+- Test results: `Test Successful in 0.026s. 14 tests run.` + `test1/test2/test3: PASS`.

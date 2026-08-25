@@ -1,0 +1,121 @@
+openapi: 3.0.3
+info:
+  title: Mirage Lambda Service API
+  version: 0.1.0
+  description: |
+    External API for the Mirage Lambda Service (guide §9 and appendix A).
+    Authentication is HMAC over a canonical request + timestamp + nonce (§9.1).
+    Every error body contains a request id and a stable service code (§9.5).
+servers:
+  - url: https://lambda.example.net
+security:
+  - hmacAuth: []
+paths:
+  /v1/functions/{function}/revisions:
+    put:
+      summary: Deploy a revision (appendix A.2)
+      parameters:
+        - { $ref: '#/components/parameters/Function' }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '201': { description: revision published, headers: { Location: { schema: { type: string } } } }
+        '413': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/functions/{function}/aliases/{alias}:
+    post:
+      summary: Move an alias (appendix A.3)
+      parameters:
+        - { $ref: '#/components/parameters/Function' }
+        - { $ref: '#/components/parameters/Alias' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [revision]
+              properties:
+                revision: { type: string, pattern: '^[0-9a-f]{64}$' }
+                precondition: { type: string, pattern: '^[0-9a-f]{64}$', nullable: true }
+      responses:
+        '200': { description: alias moved }
+        '409': { $ref: '#/components/responses/Error' }
+  /v1/functions/{function}/invoke:
+    post:
+      summary: Invoke synchronously (appendix A.4)
+      parameters:
+        - { $ref: '#/components/parameters/Function' }
+      parameters:
+        - in: query
+          name: qualifier
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, required: [input], properties: { input: { type: object }, idempotency_key: { type: string }, deadline_ms: { type: integer } } }
+      responses:
+        '200': { description: fulfilled, content: { application/json: { schema: { type: object, properties: { result: {} } } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '504': { $ref: '#/components/responses/Error' }
+  /v1/functions/{function}/invoke-async:
+    post:
+      summary: Invoke asynchronously (appendix A.5)
+      parameters:
+        - { $ref: '#/components/parameters/Function' }
+      responses:
+        '202': { description: accepted, content: { application/json: { schema: { type: object, properties: { invocation_id: { type: string } } } } } }
+  /v1/invocations/{invocationId}:
+    get:
+      summary: Invocation status (appendix A.6)
+      parameters:
+        - in: path
+          name: invocationId
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: status }
+        '404': { $ref: '#/components/responses/Error' }
+  /healthz:
+    get:
+      summary: Operational health (§9.4)
+      security: []
+      responses:
+        '200': { description: ok }
+components:
+  parameters:
+    Function:
+      in: path
+      name: function
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$' }
+    Alias:
+      in: path
+      name: alias
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$' }
+  securitySchemes:
+    hmacAuth:
+      type: apiKey
+      in: header
+      name: X-Lambda-Signature
+      description: HMAC-SHA256 over canonical request (§9.1)
+  responses:
+    Error:
+      description: error
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [request_id, code, message]
+            properties:
+              request_id: { type: string }
+              code: { type: string, enum: [INVALID_REQUEST, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, CONFLICT, PAYLOAD_TOO_LARGE, INVALID_MANIFEST, RATE_OR_QUOTA_EXCEEDED, INTERNAL, WORKER_FAILURE, NO_CAPACITY, INVOCATION_TIMEOUT] }
+              message: { type: string }
+              retryable: { type: boolean }

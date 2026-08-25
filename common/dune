@@ -1,0 +1,16 @@
+(library
+ (name mirage_lambda_common)
+ (public_name mirage_lambda.common)
+ (wrapped false)
+ (libraries yojson)
+ (modules
+  canonical_json
+  error
+  bounded_bytes
+  ids
+  budget
+  capability
+  manifest
+  bundle
+  protocol)
+ (flags (:standard -w -27-32-34-50-69-70))) ;; relaxed warnings for a library

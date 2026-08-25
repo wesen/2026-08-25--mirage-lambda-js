@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mirage-lambda.local/schemas/invocation-envelope.schema.json",
+  "title": "Invocation envelope",
+  "description": "Internal control-plane -> worker invocation envelope (guide §14.3, appendix C.2). The OCaml type is common/protocol.ml:invocation_envelope; all cross-boundary types carry protocol_version (§35.4).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol_version", "invocation_id", "revision_digest", "entrypoint", "export_name", "event_json", "context_json", "deadline_ms", "attempt"],
+  "properties": {
+    "protocol_version": { "type": "integer", "const": 1 },
+    "invocation_id": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[!-~]+$" },
+    "revision_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 hex of the bundle" },
+    "entrypoint": { "type": "string", "description": "normalized module path" },
+    "export_name": { "type": "string" },
+    "event_json": { "type": "string", "description": "canonical JSON input" },
+    "context_json": { "type": "string", "description": "canonical JSON invocation context" },
+    "deadline_ms": { "type": "integer", "format": "int64", "minimum": 0 },
+    "attempt": { "type": "integer", "minimum": 0 },
+    "capability_token": { "type": ["string", "null"] }
+  }
+}

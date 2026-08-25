@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mirage-lambda.local/schemas/function-manifest.schema.json",
+  "title": "Function manifest",
+  "description": "Strict manifest for a Mirage Lambda function revision (guide §10.2, appendix B). Unknown and duplicate fields are rejected; the OCaml parser (common/manifest.ml) is the source of truth.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "name", "entrypoint", "export", "runtime", "input", "output", "limits", "capabilities", "retry"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$", "description": "lowercase slug (§35.2)" },
+    "entrypoint": { "type": "string", "pattern": "^(cap:[a-zA-Z0-9_/-]+|[a-zA-Z0-9_/-]+\\.(js|mjs))$", "description": "normalized module path (§10.5)" },
+    "export": { "type": "string", "minLength": 1, "maxLength": 63 },
+    "runtime": { "type": "string", "const": "quickjs-2026-06-04" },
+    "input":  { "$ref": "#/$defs/ioSpec" },
+    "output": { "$ref": "#/$defs/ioSpec" },
+    "limits": { "$ref": "#/$defs/limits" },
+    "capabilities": { "$ref": "#/$defs/capabilities" },
+    "retry": { "type": "object", "additionalProperties": false, "required": ["mode"],
+      "properties": { "mode": { "type": "string", "enum": ["never", "on-error", "always"] } } }
+  },
+  "$defs": {
+    "ioSpec": {
+      "type": "object", "additionalProperties": false, "required": ["format", "maxBytes"],
+      "properties": {
+        "format": { "type": "string", "enum": ["json", "bytes"] },
+        "maxBytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "limits": {
+      "type": "object", "additionalProperties": false,
+      "required": ["jsHeapBytes", "nativeOverheadBytes", "stackBytes", "timeoutMs", "cpuMs", "maxHostCalls", "maxPendingPromises", "maxLogBytes", "maxOutboundBytes", "maxRedirects", "maxChildInvocations"],
+      "properties": {
+        "jsHeapBytes": { "type": "integer", "minimum": 0 },
+        "nativeOverheadBytes": { "type": "integer", "minimum": 0 },
+        "stackBytes": { "type": "integer", "minimum": 0 },
+        "timeoutMs": { "type": "integer", "minimum": 0 },
+        "cpuMs": { "type": "integer", "minimum": 0 },
+        "maxHostCalls": { "type": "integer", "minimum": 0 },
+        "maxPendingPromises": { "type": "integer", "minimum": 0 },
+        "maxLogBytes": { "type": "integer", "minimum": 0 },
+        "maxOutboundBytes": { "type": "integer", "minimum": 0 },
+        "maxRedirects": { "type": "integer", "minimum": 0 },
+        "maxChildInvocations": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "capabilities": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "kv": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["binding", "store", "access", "prefix"],
+            "properties": {
+              "binding": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$" },
+              "store": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$" },
+              "access": { "type": "string", "enum": ["read", "write", "read-write"] },
+              "prefix": { "type": "string", "maxLength": 255 }
+            }
+          }
+        },
+        "http": {
+          "type": "array",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["binding", "schemes", "hosts", "ports", "methods", "maxResponseBytes"],
+            "properties": {
+              "binding": { "type": "string", "pattern": "^[a-zA-Z_][a-zA-Z0-9_]{0,62}$" },
+              "schemes": { "type": "array", "items": { "type": "string", "enum": ["https", "http"] }, "minItems": 1 },
+              "hosts": { "type": "array", "items": { "type": "string" }, "minItems": 1 },
+              "ports": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 65535 } },
+              "methods": { "type": "array", "items": { "type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] }, "minItems": 1 },
+              "maxResponseBytes": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "clock": { "type": "string", "enum": ["monotonic", "wall"] },
+        "random": { "type": "string", "enum": ["cryptographic"] },
+        "logs": { "type": "boolean" },
+        "invoke": { "type": "array", "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]@[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$" } }
+      }
+    }
+  }
+}

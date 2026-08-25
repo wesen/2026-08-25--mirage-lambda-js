@@ -14,6 +14,8 @@ Intent: long-term
 Owners: []
 RelatedFiles:
     - Path: /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/mirage_lambda_service_implementation_guide.md:Source design and implementation guide this ticket implements
+    - Path: repo://common/ids.ml
+      Note: Validated identifier types (§35.2)
     - Path: repo://ttmp/2026/08/25/MIRAGE-LAMBDA--mirage-lambda-service-js-faas-from-mirageos-unikernels/tasks.md
       Note: Phase task checklist
 ExternalSources: []
@@ -22,6 +24,7 @@ LastUpdated: 2026-08-25T17:19:21.572379786-04:00
 WhatFor: Tracking the phased implementation of the Mirage Lambda Service against the source guide.
 WhenToUse: Read before starting any phase to understand its objective, exit gate, and dependency edges.
 ---
+
 
 
 # Implementation plan and phase map

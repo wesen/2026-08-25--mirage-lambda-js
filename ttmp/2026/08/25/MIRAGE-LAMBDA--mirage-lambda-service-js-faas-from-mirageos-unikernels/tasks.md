@@ -3,7 +3,7 @@
 ## TODO
 
 - [x] P0: Feasibility and toolchain lock (repo skeleton, ADR, scripts, probe scaffolding, evidence)
-- [ ] P1: Domain model, schemas, and pure common library (common/*, api/*, property tests)
+- [x] P1: Domain model, schemas, and pure common library (common/*, api/*, property tests)
 - [ ] P2: QuickJS embedding on Unix (qjs/c + qjs/lib wrapper, engine tests)
 - [ ] P3: Unix worker runtime (worker/*, fake capabilities, host API)
 - [ ] P4: Single-appliance service on Unix (control/*, CLI, end-to-end MVP)

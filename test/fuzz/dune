@@ -1,0 +1,4 @@
+(test
+ (name fuzz_common)
+ (libraries mirage_lambda.common yojson crowbar)
+ (modules fuzz_common))
