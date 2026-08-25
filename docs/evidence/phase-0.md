@@ -24,7 +24,7 @@ Pinned in `opam.locked` and `docs/adr/0000-toolchain-baseline.md`.
 | Output | Status | Path |
 |---|---|---|
 | `docs/adr/0000-toolchain-baseline.md` | ✅ done | `docs/adr/0000-toolchain-baseline.md` |
-| `qjs/vendor/quickjs-2026-06-04/` | ⏳ pending vendor | download + digest record pending |
+| `qjs/vendor/quickjs-2026-06-04/` | ✅ vendored | SHA-256 `b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a`; engine core only (quickjs-libc.c excluded) |
 | `qjs/test/probe.ml` | ✅ scaffolded | `qjs/test/probe.ml` |
 | `qjs/test/probe.js` | ✅ scaffolded | `qjs/test/probe.js` |
 | `qjs/c/qjs_port_unix.c` | ✅ done + compiles | `qjs/c/qjs_port_unix.c` |
@@ -57,7 +57,38 @@ Artifact: `build/probe/qjs_port_unix.o` — `ELF 64-bit LSB relocatable, x86-64,
 Interpretation: the freestanding platform boundary header (`qjs_port.h`) and its Unix
 implementation (`mlqjs_monotonic_ns`, `mlqjs_wall_time_ms`, `mlqjs_random_bytes`,
 `mlqjs_abort`) compile cleanly under ASan/UBSan with the strict warning set. This is real
-evidence that the §21.4 boundary is sound on Unix before QuickJS is vendored.
+evidence that the §21.4 boundary is sound on Unix.
+
+### 3b. QuickJS engine core compile (after vendoring)
+
+After vendoring the pinned release, the script also compiles the full engine
+core under the same sanitizer flags:
+
+```text
+$ ./scripts/build-unix-probe.sh
+[build-unix-probe] vendored QuickJS present: qjs/vendor/quickjs-2026-06-04
+[build-unix-probe] compiling QuickJS engine core (sanitizer build, §36.4) ...
+[build-unix-probe]   quickjs.c
+[build-unix-probe]   cutils.c
+[build-unix-probe]   dtoa.c
+[build-unix-probe]   libregexp.c
+[build-unix-probe]   libunicode.c
+[build-unix-probe] engine core compiled: 5 objects
+[build-unix-probe] Phase 0 Unix OK: platform boundary + QuickJS engine core compile under ASan/UBSan
+```
+
+Artifacts: `build/qjs-objects/{quickjs,cutils,dtoa,libregexp,libunicode}.o`
+(quickjs.o ≈ 23.9 MB with debug+sanitizers). The `CONFIG_*` defines the
+upstream Makefile sets (`-DCONFIG_VERSION=\"2026-06-04\" -DCONFIG_ATOMICS
+-DCONFIG_STACK_CHECK`) are passed by the script. `quickjs-libc.c` is excluded
+from the vendor tree (§21.2), so no `dlopen`/`pthread_create`/filesystem
+symbols are referenced.
+
+Interpretation: the QuickJS engine core builds on the Unix target with the
+pinned toolchain under ASan/UBSan. This is the Unix half of the Phase 0
+feasibility probe (§34.2 step 10); the remaining probe steps (create/destroy,
+eval, module load, async Promise, limits, interrupt, rejection tracker) are
+exercised in Phase 2 once `qjs_stubs.c` wires the real engine.
 
 ## 4. Feasibility probe (§34.2) — status
 

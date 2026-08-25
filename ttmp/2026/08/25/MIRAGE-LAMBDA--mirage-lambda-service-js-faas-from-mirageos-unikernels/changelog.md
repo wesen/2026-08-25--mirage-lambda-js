@@ -31,3 +31,12 @@ Phase 2 (scaffold): Qjs_engine/handle/module_loader/host_request interface + C F
 
 - /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/qjs/lib/qjs_engine.mli — Public engine interface (§20.1)
 
+
+## 2026-08-25
+
+Vendored QuickJS 2026-06-04 (SHA-256 b376e839...); engine core compiles under ASan/UBSan on Unix; closes largest Phase 0 open item
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/qjs/vendor/VENDOR.md — Vendor provenance + digest
+

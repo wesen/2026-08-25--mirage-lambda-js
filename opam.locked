@@ -24,7 +24,8 @@ alcotest:     "1.8+"             # unit test runner (install before Phase 1)
 crowbar:      "0.4+"             # fuzz harness (install before Phase 1 fuzz)
 
 # ---- JavaScript engine (Phase 0/2) ----
-quickjs:      "2026-06-04"        # vendored release under qjs/vendor/ (digest recorded at vendor time)
+quickjs:      "2026-06-04"        # vendored under qjs/vendor/quickjs-2026-06-04/
+quickjs_digest: "b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a"  # SHA-256 of quickjs-2026-06-04.tar.xz
 # Note: QuickJS is vendored as C source, not an opam package.
 
 # ---- Mirage / Solo5 (Phase 5/6) — to be pinned ----

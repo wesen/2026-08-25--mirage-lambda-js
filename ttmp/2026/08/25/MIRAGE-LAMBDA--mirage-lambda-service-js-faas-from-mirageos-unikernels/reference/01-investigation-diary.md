@@ -16,6 +16,8 @@ RelatedFiles:
       Note: Freestanding platform boundary contract
     - Path: repo://qjs/lib/qjs_stubs.c
       Note: OCaml FFI stubs (§22.4)
+    - Path: repo://qjs/vendor/quickjs-2026-06-04/quickjs.h
+      Note: Vendored QuickJS engine core header
     - Path: repo://scripts/build-unix-probe.sh
       Note: Compiles the §21.4 platform boundary under ASan/UBSan
 ExternalSources: []
@@ -24,6 +26,7 @@ LastUpdated: 2026-08-25T17:20:00-04:00
 WhatFor: Recording what changed, why, what worked/failed, and how to review each phase.
 WhenToUse: Read before resuming work on MIRAGE-LAMBDA to recover context.
 ---
+
 
 
 
@@ -302,3 +305,66 @@ Phase 2 is the language-runtime gate. Pinning the interface + proving the C link
 ### Technical details
 - dune `foreign_stubs` inside `(library ...)`; C compiled with the default toolchain (gcc 13.3.0).
 - qjs library `mirage_lambda.qjs` (wrapped false) depends on `mirage_lambda.common`.
+
+## Step 4: QuickJS vendoring (unblocks Phase 0/2)
+
+This step downloads the pinned QuickJS release `2026-06-04`, records its
+SHA-256, extracts only the engine core (excluding `quickjs-libc.c`), commits
+it at `qjs/vendor/quickjs-2026-06-04/`, and proves the engine core compiles
+under ASan/UBSan on Unix. This closes the largest open Phase 0 item and makes
+the Phase 2 real-engine wiring concrete.
+
+### Prompt Context
+
+**User prompt (verbatim):** "can you download it? why are you asking me"
+
+**Assistant interpretation:** Stop asking; actually perform the QuickJS vendoring step.
+
+**Inferred user intent:** Close the vendoring gap that was blocking Phases 0/2 instead of deferring it.
+
+### What I did
+- Confirmed `quickjs-2026-06-04.tar.xz` exists on `https://bellard.org/quickjs/` (it does — the guide's pin is real).
+- Downloaded it (621500 bytes) and recorded SHA-256 `b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a`.
+- Extracted ONLY the engine core (§21.1) into `qjs/vendor/quickjs-2026-06-04/`: quickjs.{c,h}+opcode+atom, cutils, dtoa, libregexp+opcode, libunicode+table, list.h, unicode_gen_def.h, VERSION, LICENSE, readme, Changelog. Explicitly EXCLUDED `quickjs-libc.c`/`.h`, `qjs.c`, `qjsc.c`, `run-test262.c`, `unicode_gen.c`, Makefile, examples, tests.
+- Wrote `qjs/vendor/VENDOR.md` (provenance + verification command).
+- Recorded the digest in `scripts/build-unix-probe.sh` (`QJS_DIGEST`), `docs/adr/0000-toolchain-baseline.md`, and `opam.locked` (`quickjs_digest`).
+- Extended `build-unix-probe.sh` to verify the digest (if the archive is present) and to compile the full engine core with the `CONFIG_*` defines the upstream Makefile sets (`-DCONFIG_VERSION=\"2026-06-04\" -DCONFIG_ATOMICS -DCONFIG_STACK_CHECK`).
+- Updated `docs/evidence/phase-0.md` with the engine-core compile evidence (5 objects; quickjs.o ≈ 23.9 MB).
+
+### Why
+The vendoring step was the largest open Phase 0 item and the gate for the real Phase 2 engine lifecycle. The user correctly called out that I should just do it rather than describe it.
+
+### What worked
+- `./scripts/build-unix-probe.sh` now compiles the platform boundary AND the full QuickJS engine core (5 objects) under `-fsanitize=address,undefined` + `-Wall -Wextra -Wconversion -Wshadow`. Phase 0 Unix feasibility: proven.
+- All 21 OCaml tests still green after vendoring (the qjs stubs still stub-fail by design until Phase 2 wires the real engine).
+- The guide's `quickjs-2026-06-04` pin is real and reachable — no need for a fallback ADR (§34.4).
+
+### What didn't work
+- `quickjs.c` won't compile with `-Wconversion` alone — it needs `CONFIG_VERSION` defined (the upstream Makefile passes it); also `CONFIG_ATOMICS` and `CONFIG_STACK_CHECK` for a default build. Found by the `expected ')' before 'CONFIG_VERSION'` error at line 7226.
+- The strict warning set produces many `-Wconversion`/`-Wsign-conversion` warnings from upstream code (expected; not errors), so the script uses `-Werror=implicit-function-declaration` rather than `-Werror` to avoid blocking on upstream style.
+
+### What I learned
+- The guide's `quickjs-2026-06-04` is a real Bellard release, not a placeholder — confirmed by `curl https://bellard.org/quickjs/`.
+- The engine core is self-contained: 5 .c files compile to objects with only the `CONFIG_*` defines and `-I` to the vendor dir; no `quickjs-libc.c` needed (§21.2 holds).
+- `quickjs.c` is ~2 MB of source → 23.9 MB sanitizer object; the build is heavy but trivially reproducible.
+
+### What was tricky to build
+- Getting the `CONFIG_VERSION` quoting right in a shell variable that ends up as a C string literal (`-DCONFIG_VERSION=\"\\\"2026-06-04\\\"\"` — the source wraps it in quotes itself).
+
+### What warrants a second pair of eyes
+- The vendor tree is committed (2.6 MB) as a release input (§34.1); confirm this matches repo policy (some teams gitignore vendor and re-fetch by digest). The guide says `opam.locked` + digest are release inputs, which implies committing.
+- The `-Wconversion` warnings from upstream are suppressed only by not using `-Werror`; a future hardening pass could patch upstream or narrow the flags, but that's a Phase 9 concern.
+
+### What should be done in the future
+- Wire the real engine lifecycle in `qjs/c/qjs_stubs.c` against these vendored objects (Phase 2 real run).
+- Run the Phase 0 probe (§34.2, 11 steps + state trace) through the real `Qjs_engine`.
+- Create the dedicated Mirage/Solo5 opam switch; run the missing-symbol audit (§34.3) against the HVT target libc using these same objects.
+
+### Code review instructions
+- Start at `qjs/vendor/VENDOR.md` and `scripts/build-unix-probe.sh`.
+- Run `eval $(opam env) && ./scripts/build-unix-probe.sh` — expect "Phase 0 Unix OK: platform boundary + QuickJS engine core compile under ASan/UBSan".
+- Verify the digest: `curl -sSL https://bellard.org/quickjs/quickjs-2026-06-04.tar.xz | sha256sum` → `b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a`.
+
+### Technical details
+- Release: `quickjs-2026-06-04.tar.xz`, 621500 bytes, SHA-256 `b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a`.
+- Engine core objects: build/qjs-objects/{quickjs,cutils,dtoa,libregexp,libunicode}.o, gcc 13.3.0, ASan/UBSan.

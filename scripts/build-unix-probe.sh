@@ -14,11 +14,9 @@ cd "$ROOT"
 QJS_VERSION="2026-06-04"
 QJS_DIR="qjs/vendor/quickjs-${QJS_VERSION}"
 QJS_ARCHIVE="quickjs-${QJS_VERSION}.tar.xz"
-# Record the upstream archive URL + digest here when vendoring. The exact
-# upstream release URL must be confirmed against bellard.org/quickjs at
-# vendor time; the digest is recorded in docs/evidence/phase-0.md.
+# Recorded at vendor time from https://bellard.org/quickjs/quickjs-2026-06-04.tar.xz
 QJS_URL_BASE="https://bellard.org/quickjs"
-QJS_DIGEST=""  # SHA-256 of the archive; filled at vendor time.
+QJS_DIGEST="b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a"
 
 CC="${CC:-cc}"
 CFLAGS="${CFLAGS:--O1 -g3 -fno-omit-frame-pointer -Wall -Wextra -Wconversion -Wshadow}"
@@ -44,6 +42,27 @@ if [[ ! -d "$QJS_DIR" ]]; then
 fi
 
 log "vendored QuickJS present: $QJS_DIR"
-log "(engine core + OCaml probe driver link in Phase 2 once qjs_stubs.c lands)"
-log "Phase 0 Unix scaffolding OK"
+log "verifying recorded digest against the archive (if present)"
+if [[ -f "/tmp/${QJS_ARCHIVE}" ]]; then
+  ACTUAL="$(sha256sum "/tmp/${QJS_ARCHIVE}" | awk '{print $1}')"
+  if [[ "$ACTUAL" != "$QJS_DIGEST" ]]; then
+    log "ERROR: digest mismatch (got $ACTUAL, want $QJS_DIGEST)"
+    exit 1
+  fi
+  log "digest OK: $ACTUAL"
+fi
+
+# CONFIG_* the upstream Makefile sets for a default build. CONFIG_VERSION is
+# a string the source quotes itself; pass it double-quoted.
+QJS_DEFINES="-DCONFIG_VERSION=\"\\\"${QJS_VERSION}\\\"\" -DCONFIG_ATOMICS -DCONFIG_STACK_CHECK"
+
+log "compiling QuickJS engine core (sanitizer build, §36.4) under $QJS_DIR"
+mkdir -p build/qjs-objects
+for src in quickjs cutils dtoa libregexp libunicode; do
+  log "  $src.c"
+  $CC $CFLAGS $SAN_CFLAGS $QJS_DEFINES -c "$QJS_DIR/$src.c" -o "build/qjs-objects/$src.o" -I"$QJS_DIR" ||
+    { log "ERROR: $src.c failed to compile"; exit 1; }
+done
+log "engine core compiled: $(ls build/qjs-objects/*.o | wc -l) objects"
+log "Phase 0 Unix OK: platform boundary + QuickJS engine core compile under ASan/UBSan"
 exit 0

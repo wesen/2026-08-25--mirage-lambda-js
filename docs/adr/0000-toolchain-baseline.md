@@ -46,7 +46,7 @@ Mirage/Solo5 lock to a dedicated switch before Phase 5/6.
 
 | Component | Value | Notes |
 |---|---|---|
-| QuickJS | release `2026-06-04` | vendored under `qjs/vendor/quickjs-2026-06-04/`; **digest recorded at vendor time** (Phase 0 step still pending: download archive, record SHA-256). Keep only the engine core: `quickjs.{c,h}`, `cutils.{c,h}`, `dtoa.{c,h}`, `libregexp.{c,h}` + opcode header, `libunicode.{c,h}` + generated tables, `VERSION`, `LICENSE`. **Exclude** `quickjs-libc.c` (POSIX/`dlopen`/`pthread`). |
+| QuickJS | release `2026-06-04` | vendored under `qjs/vendor/quickjs-2026-06-04/`; **digest recorded: SHA-256 `b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a`** (from `https://bellard.org/quickjs/quickjs-2026-06-04.tar.xz`, 621500 bytes). Keep only the engine core: `quickjs.{c,h}`, `cutils.{c,h}`, `dtoa.{c,h}`, `libregexp.{c,h}` + opcode header, `libunicode.{c,h}` + generated tables, `VERSION`, `LICENSE`. **Exclude** `quickjs-libc.c` (POSIX/`dlopen`/`pthread`). |
 
 ### Mirage / Solo5 (deferred — dedicated switch for Phase 5/6)
 
@@ -70,7 +70,7 @@ dedicated Mirage switch and pin:
 
 ## Open items (Phase 0 exit gate)
 
-1. Download the `quickjs-2026-06-04` release archive and record its SHA-256.
+1. ✅ Download the `quickjs-2026-06-04` release archive and record its SHA-256 (`b376e839b322978313d929fd20663b11ba58b75df5a46c126dd19ea2fa70ad2a`).
 2. Run `scripts/build-unix-probe.sh` against the vendored engine and capture
    the probe's state trace (§34.2) into `docs/evidence/phase-0.md`.
 3. Create the dedicated Mirage switch and run `scripts/build-hvt-probe.sh`;
