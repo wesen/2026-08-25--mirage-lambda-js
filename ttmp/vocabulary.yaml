@@ -5,6 +5,20 @@ topics:
       description: Backend services
     - slug: websocket
       description: WebSocket lifecycle & events
+    - slug: mirage
+      description: MirageOS unikernel library and device composition
+    - slug: unikernel
+      description: Solo5/MirageOS unikernel targets and HVT workers
+    - slug: ocaml
+      description: OCaml implementation and module contracts
+    - slug: quickjs
+      description: QuickJS JavaScript engine port and embedding
+    - slug: lambda
+      description: Function-as-a-service invocation semantics
+    - slug: common-library
+      description: Pure common library shared by control, worker, CLI, tests
+    - slug: capability-security
+      description: Object-capability grants, policy, egress
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes
