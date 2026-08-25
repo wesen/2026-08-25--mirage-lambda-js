@@ -1,0 +1,11 @@
+(library
+ (name mirage_lambda_qjs)
+ (public_name mirage_lambda.qjs)
+ (wrapped false)
+ (libraries mirage_lambda.common)
+ (foreign_stubs
+  (language c)
+  (include_dirs ../c)
+  (names qjs_stubs qjs_port_unix))
+ (modules qjs_handle qjs_engine qjs_module_loader qjs_host_request)
+ (flags (:standard -w -27-32-34-50-69-70)))

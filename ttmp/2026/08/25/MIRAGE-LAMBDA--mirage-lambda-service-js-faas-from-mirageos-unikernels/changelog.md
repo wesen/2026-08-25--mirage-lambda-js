@@ -22,3 +22,12 @@ Phase 1: pure common library (ids, bounded_bytes, error, budget, capability, man
 
 - /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/common/bundle.ml — MLB1 parser/writer + pure SHA-256
 
+
+## 2026-08-25
+
+Phase 2 (scaffold): Qjs_engine/handle/module_loader/host_request interface + C FFI stubs (§20.1, §22.2); module loader unit tests (4); all 21 tests green
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/qjs/lib/qjs_engine.mli — Public engine interface (§20.1)
+

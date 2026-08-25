@@ -2,3 +2,8 @@
  (name test_common)
  (libraries mirage_lambda.common yojson alcotest)
  (modules test_common))
+
+(test
+ (name test_qjs)
+ (libraries mirage_lambda.qjs alcotest)
+ (modules test_qjs))

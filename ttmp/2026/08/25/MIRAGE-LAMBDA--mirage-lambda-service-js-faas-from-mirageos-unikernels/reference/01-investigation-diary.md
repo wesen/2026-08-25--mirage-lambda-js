@@ -14,6 +14,8 @@ RelatedFiles:
       Note: Strict manifest parser (§10.2/§10.3)
     - Path: repo://qjs/c/qjs_port.h
       Note: Freestanding platform boundary contract
+    - Path: repo://qjs/lib/qjs_stubs.c
+      Note: OCaml FFI stubs (§22.4)
     - Path: repo://scripts/build-unix-probe.sh
       Note: Compiles the §21.4 platform boundary under ASan/UBSan
 ExternalSources: []
@@ -22,6 +24,7 @@ LastUpdated: 2026-08-25T17:20:00-04:00
 WhatFor: Recording what changed, why, what worked/failed, and how to review each phase.
 WhenToUse: Read before resuming work on MIRAGE-LAMBDA to recover context.
 ---
+
 
 
 
@@ -231,3 +234,71 @@ Phase 1 is the dependency-free foundation everything imports (§35.1). Pure code
 ### Technical details
 - Switch `CP.2025.08.0~8.20~2025.01`, OCaml 4.14.2, dune 3.19.1, yojson 2.2.2, alcotest 1.9.1, qcheck 0.91, crowbar (installed).
 - Test results: `Test Successful in 0.026s. 14 tests run.` + `test1/test2/test3: PASS`.
+
+## Step 3: Phase 2 — QuickJS embedding on Unix (scaffolded)
+
+This step scaffolds the three-layer QuickJS wrapper (§36.1): the public
+`Qjs_engine` interface (§20.1), opaque `Qjs_handle`, the host-request type,
+the custom module loader (§10.5), and the C FFI stubs (§22.2/§22.4). The OCaml
+library builds and links the C stubs; the stubs fail at runtime with a clear
+message until QuickJS is vendored. The pure module loader is unit-tested (4
+tests). All tests green (14 common + 4 qjs + 3 fuzz).
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 0)
+
+**Assistant interpretation:** Scaffold Phase 2: the auditable engine library with hard ownership + accounting rules, compiling on Unix.
+
+**Inferred user intent:** The stable `QJS_ENGINE` interface the worker (Phase 3) will import, with real C linkage proven (not just docs).
+
+### What I did
+- `qjs/lib/qjs_handle.{ml,mli}`: opaque integer handle with generation counter (§22.2 option 2); externals `mlqjs_create`/`mlqjs_destroy`.
+- `qjs/lib/qjs_engine.{ml,mli}`: full §20.1 `QJS_ENGINE` — `create/start/take_host_requests/resolve_host_request/pump/cancel/memory_usage/destroy`, `error`, `completion`, `progress`, `Memory`; `limits_blob` serializes `Engine_limits` for the C side.
+- `qjs/lib/qjs_module_loader.{ml,mli}`: `normalize` (./, ../, cap:) staying within bundle root; `resolve` against the validated bundle map.
+- `qjs/lib/qjs_host_request.{ml,mli}`: `Id` (int64), `result`, `t`.
+- `qjs/c/qjs_stubs.c` (+ copy in `qjs/lib/`): all §22.2 externals with `CAMLparam`/`CAMLlocal` discipline, failing via `caml_failwith` until QuickJS is vendored.
+- `qjs/lib/dune`: `foreign_stubs (language c) (names qjs_stubs qjs_port_unix)` — links the §21.4 port boundary + the FFI.
+- `test/unit/test_qjs.ml` + dune: 4 alcotest tests for the module loader.
+
+### Why
+Phase 2 is the language-runtime gate. Pinning the interface + proving the C linkage compiles lets Phase 3 (worker) import `Qjs_engine` now, while the real engine lifecycle waits on vendoring QuickJS (a tracked Phase 0/2 follow-up).
+
+### What worked
+- `dune runtest --force`: 14 common + 4 qjs + 3 fuzz, all pass.
+- The C stubs compile and link against the OCaml library (foreign_stubs), including the §21.4 port boundary object.
+- Module loader normalization correctly handles `./`, `../`, `cap:`, and rejects root-escape/absolute/bare imports.
+
+### What didn't work
+- `(foreign_library ... (files ...))` is not valid dune syntax; `include_dirs` in `foreign_library` is for headers only and the source files must live where dune looks. Fixed by moving the stub `.c` files next to the library and using `(foreign_stubs (language c) (names ...))` inside the library stanza.
+- A standalone `c/dune` with a foreign_library created a dependency cycle (object ↔ dll). Resolved by folding the stubs into the library.
+- `Val_emptyarray` isn't a macro; replaced with `caml_alloc(0, 0)`.
+- Several test-file paren/`match`-as-last-expr pitfalls (dangling match consumed the next `let`); rewrote the test file cleanly.
+
+### What I learned
+- Dune `foreign_stubs` inside a `library` is the simple path for OCaml↔C; a separate `foreign_library` is for shared objects and needs care to avoid cycles.
+- The §20.1 interface maps almost verbatim to OCaml; the only impedance is serializing `Engine_limits` to a C-decodable blob (`limits_blob`).
+- Module-path normalization is fiddly: the accumulator-vs-remaining distinction in the `walk` recursion was the bug (`util/lib/helper.js` instead of `lib/util/helper.js`); starting the accumulator with `List.rev base_dir` fixed it.
+
+### What was tricky to build
+- Getting the dune C/OCaml linkage right without a cycle and without `include_dirs` confusion.
+- The module loader `walk` recursion: the base directory must seed the accumulator, not be passed as the "remaining" list, or every relative import collapses to just the imported filename.
+
+### What warrants a second pair of eyes
+- The C stubs are skeletons that always fail; once QuickJS is vendored, every primitive must be re-audited for the §22.4 ownership rules (no retained OCaml pointers without roots; convert QuickJS exceptions to bounded C data).
+- `limits_blob` format (`%ld|`-joined ints) is a placeholder; the C decoder must match exactly and be bounds-checked.
+- `Qjs_engine.create` currently ignores the bundle; the real implementation must re-verify digests in C (§10.3 step 7) and load modules via the custom loader.
+
+### What should be done in the future
+- Vendor QuickJS `2026-06-04`, record its SHA-256, and wire the real engine lifecycle in `qjs_stubs.c`.
+- Run the Phase 0 probe (§34.2) through the real `Qjs_engine` to capture the state trace.
+- Add NIST SHA-256 vectors to validate the pure `Bundle.Sha256` against a known implementation.
+
+### Code review instructions
+- Start at `qjs/lib/qjs_engine.mli` (the §20.1 contract) and `qjs/lib/qjs_module_loader.ml`.
+- Run `eval $(opam env) && dune build && dune runtest --force` — expect 14 + 4 + 3 passing.
+- The C stubs at `qjs/lib/qjs_stubs.c` (canonical copy `qjs/c/qjs_stubs.c`) intentionally fail until QuickJS is vendored.
+
+### Technical details
+- dune `foreign_stubs` inside `(library ...)`; C compiled with the default toolchain (gcc 13.3.0).
+- qjs library `mirage_lambda.qjs` (wrapped false) depends on `mirage_lambda.common`.
