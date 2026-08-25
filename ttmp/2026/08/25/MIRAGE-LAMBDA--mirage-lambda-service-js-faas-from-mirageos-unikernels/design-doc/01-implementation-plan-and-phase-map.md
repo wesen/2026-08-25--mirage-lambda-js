@@ -13,13 +13,16 @@ DocType: design-doc
 Intent: long-term
 Owners: []
 RelatedFiles:
-    - /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/mirage_lambda_service_implementation_guide.md:Source design and implementation guide this ticket implements
+    - Path: /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/mirage_lambda_service_implementation_guide.md:Source design and implementation guide this ticket implements
+    - Path: repo://ttmp/2026/08/25/MIRAGE-LAMBDA--mirage-lambda-service-js-faas-from-mirageos-unikernels/tasks.md
+      Note: Phase task checklist
 ExternalSources: []
-Summary: "Maps the Mirage Lambda Service guide to 11 delivery phases (0-10) and records scope, exit gates, and what each phase produces."
+Summary: Maps the Mirage Lambda Service guide to 11 delivery phases (0-10) and records scope, exit gates, and what each phase produces.
 LastUpdated: 2026-08-25T17:19:21.572379786-04:00
-WhatFor: "Tracking the phased implementation of the Mirage Lambda Service against the source guide."
-WhenToUse: "Read before starting any phase to understand its objective, exit gate, and dependency edges."
+WhatFor: Tracking the phased implementation of the Mirage Lambda Service against the source guide.
+WhenToUse: Read before starting any phase to understand its objective, exit gate, and dependency edges.
 ---
+
 
 # Implementation plan and phase map
 

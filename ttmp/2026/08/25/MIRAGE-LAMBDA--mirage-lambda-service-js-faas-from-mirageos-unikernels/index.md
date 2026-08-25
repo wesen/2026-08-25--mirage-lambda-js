@@ -12,13 +12,16 @@ Topics:
 DocType: index
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: repo://mirage_lambda_service_implementation_guide.md
+      Note: Source guide this ticket implements
 ExternalSources: []
 Summary: ""
 LastUpdated: 2026-08-25T17:19:21.511051453-04:00
 WhatFor: ""
 WhenToUse: ""
 ---
+
 
 # Mirage Lambda Service - JS FaaS from MirageOS unikernels
 

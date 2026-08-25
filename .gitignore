@@ -1,0 +1,13 @@
+# OCaml / dune
+_build/
+.opam/
+*.install
+*.merlin
+
+# Phase 0 probe build artifacts
+build/
+
+# editor
+*.swp
+*~
+.vscode/
