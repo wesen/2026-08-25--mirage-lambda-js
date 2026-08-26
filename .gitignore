@@ -11,3 +11,5 @@ build/
 *.swp
 *~
 .vscode/
+control-unikernel/duniverse/
+control-unikernel/mirage/
