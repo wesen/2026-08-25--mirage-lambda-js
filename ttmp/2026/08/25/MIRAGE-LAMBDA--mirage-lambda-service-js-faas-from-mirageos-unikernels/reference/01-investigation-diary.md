@@ -715,3 +715,35 @@ Phase 4 is the functional MVP gate (§38.3): deployment and invocation usable th
 ### Technical details
 - Switch: mirage-lambda (4.14.2), mirage 4.11.2, ocaml-solo5 0.8.5, solo5 0.12.0.
 - MVP revision: sha256:5ebae7c8c6907d4ce0eacdf186e6e82e1972789c9ede81c57bc48d8e5a7f6344.
+
+## Step 11: Phase 5 HVT toolchain unblocked + boot functor (handoff point)
+
+This step unblocks the Phase 5 HVT build toolchain (the real fix, validated
+online + via the opam-monorepo source), writes the boot functor, and stops at
+the final unikernel-functor type-check — the genuine Phase 5 code work that
+remains for the next engineer.
+
+### Prompt Context
+
+**User prompt (verbatim):** "ok, do it." (then "is this hanging?", then "Write up a handoff document...")
+
+**Assistant interpretation:** Get the HVT image building; when the remaining work is real functor code, write a handoff.
+
+### What I did
+- Diagnosed the HVT build blocker via `--verbose`: opam-monorepo logged `Solve using current opam switch: CP.2025.08.0~8.20~2025.01` despite `OPAMSWITCH=mirage-lambda`. Confirmed via the opam-monorepo source (`cli/lock.ml`, `OpamGlobalState.with_`) that it reads the **default** switch.
+- Fix: `opam switch set mirage-lambda` → lockfile generates (92 entries) → `opam monorepo pull` fetches 91 repos → Zarith/cohttp/etc. build under the solo5 cross-compile context.
+- Patched the mirage-generated Makefile's `repo-add` (it used `opam-overlays` as the repo name; opam-monorepo's `is_duniverse_repo` requires the exact name `dune-universe` with URL `git+https://github.com/dune-universe/opam-overlays.git`).
+- Switched the config.ml state KV to `kv_rw_mem` for the boot proof — the `chamelon` device in mirage 4.11.2 has a real API mismatch (the `$` DSL gives a type error `block impl -> kv_rw impl` vs `('a -> 'b) impl`; plain application fails at connect time with "Unbound value block"). Deferred to §39.2 step 4.
+- Wrote the boot functor (`unikernel.ml`) with `/healthz` via `Cohttp_mirage.Server.S` + `Http.make ~callback` + `Http.respond_string`.
+- Added `certs/` dir for `ocaml-crunch`; gitignored `control-unikernel/{duniverse,mirage}` (the vendored dune's `lang 3.24` dune-project breaks the main project's dune build).
+
+### What worked
+- `mirage configure -t hvt` succeeds; lockfile (92 entries) + duniverse (91 repos) + Zarith/cohttp build under solo5.
+- Main project still 31 tests green.
+
+### What didn't work / remains
+- The HVT image is **not produced**. The build fails at the unikernel-functor type-check: the `cohttp_server` device passes `Cohttp_mirage.Server.Make(Conduit)` whose `listen` has type `Conduit_mirage.server -> t -> unit Lwt.t` but the generated `main.ml` expects `[> `TCP of unit -> int ] -> t -> unit Lwt.t` (the conduit server's port is a `unit -> int` runtime-arg thunk). The functor arg type `Cohttp_mirage.Server.S` doesn't include `listen`/`make`. This is the real Phase 5 code work.
+
+### Code review instructions
+- Read `HANDOFF.md` at the repo root for the full continuation guide.
+- The remaining fix is a functor signature: either take the `Server.Make(Conduit)` result signature (with `listen`) as the arg, or build `Cohttp_mirage.Server.Make` inside the unikernel from a conduit arg (the ocaml-tls example pattern at `duniverse/ocaml-tls/mirage/example2/unikernel.ml`).

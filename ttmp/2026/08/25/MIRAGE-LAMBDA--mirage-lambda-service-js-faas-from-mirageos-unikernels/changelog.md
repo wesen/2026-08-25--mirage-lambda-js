@@ -94,3 +94,12 @@ Phase 5 (start): Mirage control-plane unikernel config.ml + unikernel.ml; mirage
 
 - /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/control-unikernel/config.ml — Mirage device composition (§26.1)
 
+
+## 2026-08-25
+
+Phase 5 HVT toolchain unblocked (opam-monorepo default-switch fix; lockfile 92 entries; duniverse 91 repos); boot functor written; HVT image blocked on cohttp_server functor arg type — handoff point
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/control-unikernel/unikernel.ml — Boot functor /healthz
+
