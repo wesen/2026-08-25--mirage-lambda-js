@@ -53,6 +53,12 @@ val eval : t -> string -> bool
 (** Eval an int expression; returns the int or an engine error. *)
 val eval_int : t -> string -> (int, error) result
 
+(** Store a bundle module (path, source) for the module loader (§24.4). *)
+val set_module : t -> Ids.Module_path.t -> string -> unit
+
+(** Evaluate a module entrypoint by path; returns true if exception. *)
+val eval_module : t -> Ids.Module_path.t -> bool
+
 val take_host_requests : t -> Qjs_host_request.t list
 
 val resolve_host_request :

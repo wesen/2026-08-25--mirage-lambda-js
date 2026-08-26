@@ -445,3 +445,64 @@ This is the language-runtime gate (§33 uncertainty class 1). Proving the engine
 - Engine: QuickJS 2026-06-04 (vendored), compiled with `-fPIC -DCONFIG_VERSION="2026-06-04" -DCONFIG_ATOMICS -DCONFIG_STACK_CHECK -lm`.
 - Intrinsics: BaseObjects, Eval, JSON, RegExp, MapSet, TypedArrays, Promise (§21.5 reduced set; excludes Date, WeakRef, Proxy).
 - Handle: generation-counted integer table (§22.2 option 2), 64 slots.
+
+## Step 6: Module loader (§34.2 step 3) and the Promise bridge foundation
+
+This step wires the C module loader (`JS_SetModuleLoaderFunc` + a bundle-map
+lookup + `JS_Eval` with `COMPILE_ONLY`), adds `set_module`/`eval_module`
+externals, and proves probe step 3 (load a two-module ECMAScript program with
+a cross-module import). All 31 tests green.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 5 — "Continue. commit at appropriate intervals...")
+
+**Assistant interpretation:** Continue wiring the remaining probe steps; the module loader is next.
+
+### What I did
+- Added a `mlqjs_module_entry` array (256 slots) to `mlqjs_runtime` for the bundle map.
+- Implemented `mlqjs_module_loader` (C callback): finds the module by name in the bundle map, compiles with `JS_Eval(..., JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY)`, extracts the `JSModuleDef*` via `JS_VALUE_GET_PTR`, frees the JSValue wrapper, and returns the pointer. Throws `JS_ThrowReferenceError` if not found.
+- Set `JS_SetModuleLoaderFunc(q->rt, NULL, mlqjs_module_loader, q)` — NULL normalizer uses QuickJS's default `./`/`../` resolver (the custom normalizer with `cap:` + root-escape is a later step).
+- Added `mlqjs_set_module` (store a bundle module path+source) and `mlqjs_eval_module` (compile+run a module entrypoint) externals.
+- Freed module sources in `mlqjs_destroy`.
+- Exposed `set_module`/`eval_module` in `qjs_handle.{ml,mli}` and `qjs_engine.{ml,mli}`.
+- Added 2 tests: `module loader (step 3)` (index.js imports addOne from lib.js → addOne(41)=42) and `module not found` (missing import throws ReferenceError).
+
+### Why
+Probe step 3 is the gateway to the async handler (steps 4-5) — the probe.js imports `later` from `host:test`, which requires the module loader to resolve the virtual `cap:` module. Proving the real module loader with two real modules first validates the compile/resolve/execute path.
+
+### What worked
+- Two-module program: `index.js` imports `addOne` from `./lib.js`, calls `addOne(41)`, stores 42 in `globalThis.__r`. Eval succeeds, `__r` reads back 42.
+- Module not found: importing `./missing.js` throws a ReferenceError (correctly).
+- Full suite: 14 common + 4 qjs + 10 engine + 3 fuzz = 31 tests, all green.
+
+### What didn't work
+- The module loader's `JS_Eval(..., COMPILE_ONLY)` returned a JSValue wrapping the module. Extracting the pointer with `JS_VALUE_GET_PTR` and returning it WITHOUT freeing the JSValue caused a reference leak → `JS_FreeRuntime` assertion `list_empty(&rt->gc_obj_list)` failed → core dump. Fix: `JS_FreeValue(ctx, val)` after extracting the pointer (the module stays alive because the context's module list holds a reference).
+- Using a custom `mlqjs_module_normalize` that just duplicated the import name (`./lib.js`) broke the lookup — the module was stored as `lib.js` but the loader looked for `./lib.js`. Fix: pass NULL for the normalizer to use QuickJS's default resolver, which strips `./` and resolves relative to the base.
+
+### What I learned
+- `JS_Eval` with `JS_EVAL_FLAG_COMPILE_ONLY | JS_EVAL_TYPE_MODULE` returns a JSValue with `JS_TAG_MODULE`; the `JSModuleDef*` is extracted with `JS_VALUE_GET_PTR`. The JSValue must be freed (the module list holds the real reference).
+- The default QuickJS normalizer (NULL) resolves `./lib.js` to `lib.js` relative to the importing module's base name — this is exactly the §10.5 relative-import semantics for v1.
+- The module loader is called recursively: evaluating `index.js` triggers the loader for `./lib.js`, which compiles `lib.js` and returns its `JSModuleDef*`, then `index.js` is compiled and run.
+
+### What was tricky to build
+- The JSValue reference leak in the module loader: the symptom was a core dump on `JS_FreeRuntime` (assertion on the GC object list), not a test failure. It only manifested with the two-module test because the single-module test's module was the entrypoint (compiled+run in one step, not via the loader callback). Debugging required isolating the single-module case (works) vs the two-module case (crashes) to narrow it to the loader callback.
+
+### What warrants a second pair of eyes
+- The module map is a fixed 256-slot array in the runtime struct — no overflow check beyond `>= MLQJS_MAX_MODULES`. The bundle parser already caps at `max_module_count = 4096`, so the C array should match (or be dynamically sized). For now 256 is enough for the probe.
+- The `mlqjs_module_normalize` function is defined but unused (we pass NULL). Remove it or wire it when adding `cap:` support.
+- `JS_FreeValue` on the module value relies on the context's module list holding a reference; verify this is true for all module lifecycle paths (e.g., if a module fails to compile, is it still on the list?).
+
+### What should be done in the future
+- Wire the custom normalizer for `cap:` virtual modules (§24.4) and root-escape rejection.
+- Implement the C host callback + `JS_NewPromiseCapability` for probe steps 4-5 (async handler, host Promise settlement).
+- Test the unhandled-rejection tracker (step 9): create a Promise, reject it without a catch, verify the tracker fires.
+- Run the full 100k-cycle ASan evidence run.
+
+### Code review instructions
+- Start at `qjs/c/qjs_stubs.c` (`mlqjs_module_loader`, `mlqjs_set_module`, `mlqjs_eval_module`) and `test/unit/test_qjs_engine.ml` (`test_module_loader`, `test_module_not_found`).
+- Run `eval $(opam env) && dune runtest --force` — expect 31 tests green.
+
+### Technical details
+- `JS_SetModuleLoaderFunc(rt, NULL, mlqjs_module_loader, q)` — NULL normalizer = default QuickJS resolver.
+- `JS_Eval(ctx, src, len, name, JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY)` → `JS_VALUE_GET_PTR(val)` → `JS_FreeValue(ctx, val)` → return `JSModuleDef*`.

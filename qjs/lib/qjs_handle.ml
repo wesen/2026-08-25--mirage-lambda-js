@@ -29,3 +29,9 @@ external host_call_count : t -> int = "mlqjs_host_call_count"
 
 (* Memory usage: (used_count, limit, pending_jobs). *)
 external mem_usage : t -> (int * int * int) = "mlqjs_mem_usage"
+
+(* Store a bundle module (path, source) for the module loader (§24.4). *)
+external set_module : t -> string -> string -> unit = "mlqjs_set_module"
+
+(* Evaluate a module entrypoint by path; returns true if exception. *)
+external eval_module : t -> string -> bool = "mlqjs_eval_module"

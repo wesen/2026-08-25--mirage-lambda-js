@@ -74,6 +74,12 @@ let eval_int t src =
   try Ok (Qjs_handle.eval_int t src)
   with Failure msg -> Error (Engine msg)
 
+let set_module t path src =
+  Qjs_handle.set_module t (Ids.Module_path.to_string path) src
+
+let eval_module t path =
+  Qjs_handle.eval_module t (Ids.Module_path.to_string path)
+
 (* Pump up to max_jobs pending jobs. Returns a progress hint. *)
 let pump t ~max_jobs =
   (try

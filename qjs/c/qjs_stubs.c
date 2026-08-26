@@ -33,11 +33,22 @@ typedef enum {
     MLQJS_REASON_CANCEL
 } mlqjs_interrupt_reason;
 
+#define MLQJS_MAX_MODULES 256
+#define MLQJS_MAX_PATH_LEN 512
+
+typedef struct {
+    char path[MLQJS_MAX_PATH_LEN];
+    char *source;     /* malloc'd source bytes */
+    size_t source_len;
+} mlqjs_module_entry;
+
 typedef struct {
     JSRuntime *rt;
     JSContext *ctx;
     mlqjs_alloc_state *a_state;     /* invocation-owned counter (§5.4) */
     mlqjs_host_queue requests;      /* bounded host request queue (§23.1) */
+    mlqjs_module_entry modules[MLQJS_MAX_MODULES]; /* bundle module map (§24.4) */
+    int module_count;
     uint64_t deadline_ns;
     uint64_t cpu_budget_ns;
     uint64_t engine_start_ns;
@@ -49,6 +60,40 @@ typedef struct {
 
 static mlqjs_runtime *g_table[MLQJS_TABLE_CAP];
 static int g_generation[MLQJS_TABLE_CAP];
+
+/* ---- module loader callback (§24.4) ---- */
+/* Find a module by name in the bundle map and compile it. The module source
+ * comes from the already-validated in-memory bundle; the loader never does I/O. */
+static JSModuleDef *mlqjs_module_loader(JSContext *ctx,
+                                        const char *module_name, void *opaque)
+{
+    mlqjs_runtime *q = (mlqjs_runtime *)opaque;
+    for (int i = 0; i < q->module_count; i++) {
+        if (strcmp(q->modules[i].path, module_name) == 0) {
+            JSValue val = JS_Eval(ctx, q->modules[i].source, q->modules[i].source_len,
+                                 module_name, JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
+            if (JS_IsException(val))
+                return NULL;
+            JSModuleDef *m = (JSModuleDef *)JS_VALUE_GET_PTR(val);
+            JS_FreeValue(ctx, val);  /* free the value wrapper; module stays alive (held by ctx module list) */
+            return m;
+        }
+    }
+    /* module not found — throw a JS TypeError */
+    JS_ThrowReferenceError(ctx, "could not load module '%s'", module_name);
+    return NULL;
+}
+
+/* simple normalize: just duplicate the name (relative imports handled by QuickJS) */
+static char *mlqjs_module_normalize(JSContext *ctx,
+                                    const char *base, const char *name, void *opaque)
+{
+    (void)base; (void)opaque;
+    char *ret = js_malloc(ctx, strlen(name) + 1);
+    if (!ret) return NULL;
+    strcpy(ret, name);
+    return ret;
+}
 
 /* ---- interrupt handler (§24.2) ---- */
 static int mlqjs_interrupt(JSRuntime *rt, void *opaque)
@@ -172,6 +217,12 @@ CAMLprim value mlqjs_create(value v_limits)
     JS_AddIntrinsicPromise(q->ctx);
     JS_SetContextOpaque(q->ctx, q);
 
+    /* 9. module loader (§24.1 step 9, §24.4). Use the default normalizer (NULL)
+     * which resolves ./ and ../ relative imports; the custom normalizer that
+     * handles cap: and root-escape is a later step. */
+    JS_SetModuleLoaderFunc(q->rt, NULL, mlqjs_module_loader, q);
+    q->module_count = 0;
+
     int handle = table_alloc(q);
     if (!handle) {
         JS_FreeContext(q->ctx); JS_FreeRuntime(q->rt);
@@ -193,6 +244,9 @@ CAMLprim value mlqjs_destroy(value v_handle)
         if (q->rt) JS_FreeRuntime(q->rt);
         mlqjs_host_queue_destroy(&q->requests);
         mlqjs_alloc_state_free(q->a_state);
+        /* free module sources (§24.4) */
+        for (int i = 0; i < q->module_count; i++)
+            free(q->modules[i].source);
         free(q);
     }
     CAMLreturn(Val_unit);
@@ -230,6 +284,50 @@ CAMLprim value mlqjs_eval_int(value v_handle, value v_src)
     }
     JS_FreeValue(q->ctx, r);
     CAMLreturn(Val_int(out));
+}
+
+/* ---- [mlqjs_set_module] : int -> string -> string -> unit
+ * Store a bundle module (path, source) in the runtime for the module loader. ---- */
+CAMLprim value mlqjs_set_module(value v_handle, value v_path, value v_src)
+{
+    CAMLparam3(v_handle, v_path, v_src);
+    mlqjs_runtime *q = table_get(v_handle, NULL);
+    if (!q) caml_failwith("mlqjs_set_module: stale handle");
+    if (q->module_count >= MLQJS_MAX_MODULES) caml_failwith("mlqjs_set_module: too many modules");
+    const char *path = String_val(v_path);
+    size_t path_len = caml_string_length(v_path);
+    if (path_len >= MLQJS_MAX_PATH_LEN) caml_failwith("mlqjs_set_module: path too long");
+    memcpy(q->modules[q->module_count].path, path, path_len);
+    q->modules[q->module_count].path[path_len] = '\0';
+    size_t src_len = caml_string_length(v_src);
+    q->modules[q->module_count].source = malloc(src_len ? src_len : 1);
+    if (!q->modules[q->module_count].source) caml_failwith("mlqjs_set_module: oom");
+    memcpy(q->modules[q->module_count].source, String_val(v_src), src_len);
+    q->modules[q->module_count].source_len = src_len;
+    q->module_count++;
+    CAMLreturn(Val_unit);
+}
+
+/* ---- [mlqjs_eval_module] : int -> string -> bool
+ * Evaluate a module entrypoint (by path). Returns true if exception. ---- */
+CAMLprim value mlqjs_eval_module(value v_handle, value v_path)
+{
+    CAMLparam2(v_handle, v_path);
+    mlqjs_runtime *q = table_get(v_handle, NULL);
+    if (!q) caml_failwith("mlqjs_eval_module: stale handle");
+    /* find the entrypoint in the module map */
+    const char *path = String_val(v_path);
+    for (int i = 0; i < q->module_count; i++) {
+        if (strcmp(q->modules[i].path, path) == 0) {
+            JSValue val = JS_Eval(q->ctx, q->modules[i].source, q->modules[i].source_len,
+                                  path, JS_EVAL_TYPE_MODULE);
+            int is_exc = JS_IsException(val);
+            if (is_exc) { JSValue e = JS_GetException(q->ctx); JS_FreeValue(q->ctx, e); }
+            JS_FreeValue(q->ctx, val);
+            CAMLreturn(Val_bool(is_exc));
+        }
+    }
+    caml_failwith("mlqjs_eval_module: entrypoint not found");
 }
 
 /* ---- [mlqjs_pump] : int -> int -> int ---- */

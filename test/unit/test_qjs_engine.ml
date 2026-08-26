@@ -128,6 +128,39 @@ let test_pump_jobs () =
     Qjs_engine.destroy t
   | Error _ -> Alcotest.fail "create failed"
 
+(* §34.2 step 3: load a two-module ECMAScript program using the custom module loader. *)
+let test_module_loader () =
+  match Qjs_engine.create ~limits:default_limits ~bundle:dummy_bundle with
+  | Ok t ->
+    (* module lib.js: exports addOne *)
+    let lib_path = Result.get_ok (Ids.Module_path.of_string "lib.js") in
+    let lib_src = "export function addOne(x) { return x + 1; }" in
+    Qjs_engine.set_module t lib_path lib_src;
+    (* module index.js: imports from ./lib and uses it *)
+    let idx_path = Result.get_ok (Ids.Module_path.of_string "index.js") in
+    let idx_src = "import { addOne } from \"./lib.js\"; globalThis.__result = addOne(41);" in
+    Qjs_engine.set_module t idx_path idx_src;
+    let threw = Qjs_engine.eval_module t idx_path in
+    Alcotest.(check bool) "module eval does not throw" false threw;
+    (* verify the imported function ran: __result should be 42 *)
+    (match Qjs_engine.eval_int t "__result" with
+     | Ok n -> Alcotest.(check int) "addOne(41) = 42" 42 n
+     | Error _ -> Alcotest.fail "could not read __result");
+    Qjs_engine.destroy t
+  | Error _ -> Alcotest.fail "create failed"
+
+(* module not found: loader rejects unknown module. *)
+let test_module_not_found () =
+  match Qjs_engine.create ~limits:default_limits ~bundle:dummy_bundle with
+  | Ok t ->
+    let idx_path = Result.get_ok (Ids.Module_path.of_string "index.js") in
+    let idx_src = "import { x } from \"./missing.js\";" in
+    Qjs_engine.set_module t idx_path idx_src;
+    let threw = Qjs_engine.eval_module t idx_path in
+    Alcotest.(check bool) "missing module throws" true threw;
+    Qjs_engine.destroy t
+  | Error _ -> Alcotest.fail "create failed"
+
 let tests = [
   "engine", [
     Alcotest.test_case "create/destroy x100" `Slow test_create_destroy;
@@ -138,6 +171,8 @@ let tests = [
     Alcotest.test_case "interrupt infinite loop" `Quick test_interrupt;
     Alcotest.test_case "10k cycles (ASan)" `Slow test_many_cycles;
     Alcotest.test_case "pump jobs" `Quick test_pump_jobs;
+    Alcotest.test_case "module loader (step 3)" `Quick test_module_loader;
+    Alcotest.test_case "module not found" `Quick test_module_not_found;
   ];
 ]
 

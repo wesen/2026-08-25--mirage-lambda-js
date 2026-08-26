@@ -49,3 +49,12 @@ Phase 2 real engine: QuickJS lifecycle wired (create/eval/limits/interrupt/pump)
 
 - /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/qjs/c/qjs_stubs.c — Real QuickJS engine FFI lifecycle
 
+
+## 2026-08-25
+
+Module loader wired (§34.2 step 3): two-module ESM import works; set_module/eval_module externals; 31 tests green
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/qjs/c/qjs_stubs.c — C module loader callback (§24.4)
+
