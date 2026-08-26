@@ -36,6 +36,7 @@ module Invocation_id = struct
     end
   let to_string t = t
   let equal a b = String.equal a b
+  let of_string_exn s = match of_string s with Ok v -> v | Error e -> failwith (Error.Validation.to_string e)
 end
 
 module Lease_id = Worker_id  (* lease ids share the slug policy for v1 *)

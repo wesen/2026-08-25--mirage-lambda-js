@@ -44,7 +44,12 @@ module Digest : sig
 end
 
 module Revision_id : sig
-  include module type of Digest
+  type t = Digest.t
+  val of_string : string -> (t, Error.Validation.t) result
+  val to_string : t -> string
+  val compare : t -> t -> int
+  val equal : t -> t -> bool
+  val constant_time_equal : t -> t -> bool
 end
 
 module Key_prefix : sig

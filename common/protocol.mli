@@ -15,6 +15,7 @@ end
 module Invocation_id : sig
   type t = private string
   val of_string : string -> (t, Error.Validation.t) result
+  val of_string_exn : string -> t
   val to_string : t -> string
   val equal : t -> t -> bool
 end

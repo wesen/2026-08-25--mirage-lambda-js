@@ -1,0 +1,14 @@
+(library
+ (name mirage_lambda_control)
+ (public_name mirage_lambda.control)
+ (wrapped false)
+ (libraries mirage_lambda.common mirage_lambda.qjs mirage_lambda.worker yojson unix cohttp cohttp-lwt-unix lwt)
+ (modules artifact_store registry admission scheduler worker_pool)
+ (flags (:standard -w -27-32-34-50-69-70)))
+
+(executable
+ (name mirage_lambda_control)
+ (public_name mirage_lambda-control)
+ (modules mirage_lambda_control)
+ (libraries mirage_lambda.control cohttp-lwt-unix lwt unix yojson)
+ (flags (:standard -w -27-32-34-50-69-70)))
