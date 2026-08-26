@@ -67,3 +67,12 @@ Promise bridge (§23.1): host.later async handler + resolve + unhandled rejectio
 
 - /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/qjs/c/qjs_stubs.c — Promise bridge + host callback
 
+
+## 2026-08-25
+
+Phase 3: Unix worker runtime — invocation context, capability broker, host fakes (log/clock/crypto/kv), dispatch loop (§23.2), end-to-end test; 34 tests green
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/worker/runtime_host.ml — Worker dispatch loop (§23.2)
+

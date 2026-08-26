@@ -12,3 +12,8 @@
  (name test_qjs_engine)
  (libraries mirage_lambda.qjs alcotest)
  (modules test_qjs_engine))
+
+(test
+ (name test_worker)
+ (libraries mirage_lambda.worker yojson alcotest)
+ (modules test_worker))

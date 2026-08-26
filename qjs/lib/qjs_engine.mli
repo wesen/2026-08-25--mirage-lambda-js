@@ -53,6 +53,9 @@ val eval : t -> string -> bool
 (** Eval an int expression; returns the int or an engine error. *)
 val eval_int : t -> string -> (int, error) result
 
+(** Eval a string expression; returns the string or an engine error. *)
+val eval_string : t -> string -> (string, error) result
+
 (** Store a bundle module (path, source) for the module loader (§24.4). *)
 val set_module : t -> Ids.Module_path.t -> string -> unit
 

@@ -9,6 +9,7 @@ val destroy : t -> unit
 
 val eval : t -> string -> bool
 val eval_int : t -> string -> int
+val eval_string : t -> string -> string
 val pump : t -> max_jobs:int -> int
 val cancel : t -> reason:int -> unit
 val take_requests : t -> (int64 * string * string) array

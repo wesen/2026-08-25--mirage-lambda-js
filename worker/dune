@@ -1,0 +1,7 @@
+(library
+ (name mirage_lambda_worker)
+ (public_name mirage_lambda.worker)
+ (wrapped false)
+ (libraries mirage_lambda.common mirage_lambda.qjs yojson unix)
+ (modules invocation capability_broker host_log host_clock host_crypto host_kv runtime_host)
+ (flags (:standard -w -27-32-34-50-69-70)))

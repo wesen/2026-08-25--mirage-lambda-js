@@ -15,6 +15,9 @@ external eval : t -> string -> bool = "mlqjs_eval"
    Raises (Failure) on exception or non-int. *)
 external eval_int : t -> string -> int = "mlqjs_eval_int"
 
+(* Eval an expression that produces a string; returns it. Raises on exception. *)
+external eval_string : t -> string -> string = "mlqjs_eval_string"
+
 (* Run up to max_jobs pending QuickJS jobs. Returns:
    0 = nothing pending (Waiting), 1 = ran jobs, 2 = interrupted. *)
 external pump : t -> max_jobs:int -> int = "mlqjs_pump"

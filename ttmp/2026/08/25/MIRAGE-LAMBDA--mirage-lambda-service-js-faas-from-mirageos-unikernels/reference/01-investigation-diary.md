@@ -571,3 +571,72 @@ The Promise bridge (§23.1) is the core runtime bridge: "A JavaScript host call 
 
 ### Technical details
 - Probe steps proven on Unix: 1 (create/destroy), 2 (eval 1+2), 3 (two-module import), 4 (async handler), 5 (host Promise settle), 6 (heap OOM), 7 (stack limit), 8 (interrupt), 9 (unhandled rejection), 11 (10k cycles). Only step 10 (HVT boot) remains.
+
+## Step 8: Phase 3 — Unix worker runtime (end-to-end invocation)
+
+This step implements the worker execution semantics: invocation context,
+capability broker, host API fakes (log, clock, crypto, kv), the dispatch loop
+(§23.2), and a generic `host.rpc(op, arg)` C callback for the Promise bridge.
+An end-to-end test runs a JS handler that calls host RPC operations (log.info,
+kv.put, kv.get, clock.monotonicMs) through the Promise bridge, driven by the
+dispatch loop to completion. 34 tests green.
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 5 — "Continue. commit at appropriate intervals...")
+
+**Assistant interpretation:** Implement Phase 3 — wrap the engine in the worker execution semantics with fake capabilities.
+
+### What I did
+- `worker/invocation.{ml,mli}`: invocation context (engine, budget, policy, deadline, event/context JSON).
+- `worker/capability_broker.{ml,mli}`: dispatches host requests to fake implementations; parses "op\narg_json" payload from the C host.rpc callback; handles log.debug/info/warn/error, clock.monotonicMs, crypto.randomBytes, kv.get/put.
+- `worker/host_log.{ml,mli}`: bounded structured log buffer (§37.3 Host_log.Buffer).
+- `worker/host_clock.{ml,mli}`: monotonic clock — real (Unix.gettimeofday) or scripted (deterministic sequence).
+- `worker/host_crypto.{ml,mli}`: random bytes — real (/dev/urandom) or deterministic (seeded PRNG).
+- `worker/host_kv.{ml,mli}`: in-memory KV store with configurable failures (§37.3 Host_kv.Memory).
+- `worker/runtime_host.ml`: the dispatch loop (§23.2) — pump → drain host requests → dispatch through broker → resolve Promises → pump → check `__done` → read `JSON.stringify(__result)` → return.
+- C stubs: added `mlqjs_host_rpc` (generic host RPC callback: `JS_NewPromiseCapability` + `JS_JSONStringify` + enqueue with "op\narg_json" payload) and `mlqjs_eval_string` (eval expression → return string via `JS_ToCString`); installed `host.rpc` alongside `host.later` on the global `host` object.
+- `test/unit/test_worker.ml`: end-to-end test — JS handler calls `host.rpc("log.info", ...)`, `host.rpc("kv.put", ...)`, `host.rpc("kv.get", ...)`, `host.rpc("clock.monotonicMs", ...)`; dispatch loop drives to completion; verifies kv value "1", log "start" event, and the result JSON.
+
+### Why
+Phase 3 is where the engine meets the service semantics. The dispatch loop (§23.2) is the only transition path between QuickJS and the host; proving it end-to-end with fake capabilities validates the execution model before adding real Mirage devices (Phase 5/6).
+
+### What worked
+- End-to-end: JS async IIFE calls host RPC → C callback creates Promise + enqueues → OCaml drains + dispatches through broker → resolves with JSON result → pump settles → `__done` = true → result read back. kv value "1", log "start" captured, result JSON correct.
+- Full suite: 14 common + 4 qjs + 12 engine + 3 fuzz + 1 worker = 34 tests, all green.
+- `host.rpc("kv.put", {key:"counter", value:"1"})` → `host.rpc("kv.get", {key:"counter"})` → returns `"1"` (quoted string) → JS reads it as a string.
+
+### What didn't work
+- `Printf.sprintf "%ld"` expects `int32` not `int` (from `Int64.to_int`); fix: `string_of_int`.
+- `Host_log.append` wasn't exposed in the `.mli`; the broker called it directly. Fix: expose it.
+- Warning 33 (unused open `Ids`) in the broker; fix: remove the open.
+
+### What I learned
+- The `host.rpc(op, arg)` generic RPC pattern is the right abstraction for Phase 3: a single C callback handles all host operations, and the OCaml broker dispatches based on the operation string. This matches §23.1's design (C callback queues a request, OCaml performs the operation).
+- `JS_JSONStringify` converts a JS object to a JSON string for the payload; `JS_ToCString` converts any JSValue to a C string for the result.
+- The dispatch loop is a simple pump→drain→resolve→check loop for synchronous fakes; Lwt integration (§23.2) is for when host calls do real async I/O (Phase 5+).
+
+### What was tricky to build
+- Detecting handler completion: the JS handler is async (returns a Promise). The dispatch loop needs to know when the Promise has settled and the result is available. Using `globalThis.__done = true` + `globalThis.__result = value` is a pragmatic Phase 3 approach; the real version (Phase 4) observes the engine's `Complete` progress (§20.1).
+- The `host.rpc` payload format ("op\narg_json") is a simple delimiter; a binary framing would be more robust but JSON parsing handles it for now.
+
+### What warrants a second pair of eyes
+- The dispatch loop has a `max_turns` cap (100) to prevent infinite loops; a real implementation should use the deadline/clock (§5.3) instead of a turn counter.
+- The capability broker passes `Capability.empty` as the policy — real policy enforcement (§20.2) is a Phase 8 concern. The broker should check each operation against the invocation's compiled policy.
+- The `host.rpc` callback doesn't enforce `max_host_calls` (§5.4 budget) — the host queue is bounded but the per-invocation call count isn't checked.
+
+### What should be done in the future
+- Wire resource limits (heap, stack, CPU, deadline) into the dispatch loop's turn check.
+- Wire cancellation (§34.2) into the dispatch loop: `Qjs_engine.cancel` on timeout.
+- Implement the real `env.log`, `env.kv`, `env.clock`, `env.crypto` JS API surface (§37.1) as C-installed objects, not just `host.rpc`.
+- Integrate Lwt for real async host I/O (§23.2).
+- Run the Phase 3 exit gate: "end-to-end invocation; resource limits enforced; cancellation works; host calls async + metered."
+
+### Code review instructions
+- Start at `worker/runtime_host.ml` (the dispatch loop), `worker/capability_broker.ml` (the dispatcher), and `test/unit/test_worker.ml` (the end-to-end test).
+- Run `eval $(opam env) && dune runtest --force` — expect 34 tests green.
+
+### Technical details
+- `host.rpc(op, arg)` C callback: `JS_NewPromiseCapability` + `JS_JSONStringify(arg)` + enqueue "op\narg_json" + promise table insert.
+- `mlqjs_eval_string`: `JS_Eval` → `JS_ToCString` → `caml_copy_string`.
+- Dispatch loop: pump → take_requests → broker.dispatch → resolve → pump → check `__done` → `JSON.stringify(__result)`.

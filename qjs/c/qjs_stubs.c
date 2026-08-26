@@ -286,6 +286,28 @@ CAMLprim value mlqjs_eval_int(value v_handle, value v_src)
     CAMLreturn(Val_int(out));
 }
 
+/* ---- [mlqjs_eval_string] : int -> string -> string
+ * Eval an expression that should produce a string; return it. Raises on exception. ---- */
+CAMLprim value mlqjs_eval_string(value v_handle, value v_src)
+{
+    CAMLparam2(v_handle, v_src);
+    CAMLlocal1(v_result);
+    mlqjs_runtime *q = table_get(v_handle, NULL);
+    if (!q) caml_failwith("mlqjs_eval_string: stale handle");
+    JSValue r = JS_Eval(q->ctx, String_val(v_src), caml_string_length(v_src),
+                        "<eval>", JS_EVAL_TYPE_GLOBAL);
+    if (JS_IsException(r)) {
+        JSValue e = JS_GetException(q->ctx); JS_FreeValue(q->ctx, e); JS_FreeValue(q->ctx, r);
+        caml_failwith("mlqjs_eval_string: eval threw");
+    }
+    const char *s = JS_ToCString(q->ctx, r);
+    if (!s) { JS_FreeValue(q->ctx, r); caml_failwith("mlqjs_eval_string: not a string-convertible"); }
+    v_result = caml_copy_string(s);
+    JS_FreeCString(q->ctx, s);
+    JS_FreeValue(q->ctx, r);
+    CAMLreturn(v_result);
+}
+
 /* ---- [mlqjs_set_module] : int -> string -> string -> unit
  * Store a bundle module (path, source) in the runtime for the module loader. ---- */
 CAMLprim value mlqjs_set_module(value v_handle, value v_path, value v_src)
@@ -419,12 +441,65 @@ static JSValue mlqjs_host_later(JSContext *ctx, JSValueConst this_val,
     return promise;
 }
 
-/* install the host object with host.later() */
+/* the generic host.rpc(op, arg) C callback: creates a Promise, enqueues a
+ * host request with operation name + JSON arg as payload. The OCaml side
+ * dispatches based on the operation string (§23.1, §37.1). */
+static JSValue mlqjs_host_rpc(JSContext *ctx, JSValueConst this_val,
+                              int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 2)
+        return JS_ThrowTypeError(ctx, "host.rpc expects (op, arg)");
+    mlqjs_runtime *q = (mlqjs_runtime *)JS_GetContextOpaque(ctx);
+
+    /* extract operation string */
+    const char *op = JS_ToCString(ctx, argv[0]);
+    if (!op) return JS_ThrowTypeError(ctx, "host.rpc: op must be a string");
+
+    /* extract arg as JSON string */
+    JSValue json_val = JS_JSONStringify(ctx, argv[1], JS_UNDEFINED, JS_UNDEFINED);
+    const char *arg_json = NULL;
+    if (!JS_IsException(json_val)) {
+        arg_json = JS_ToCString(ctx, json_val);
+        JS_FreeValue(ctx, json_val);
+    }
+    if (!arg_json) { JS_FreeCString(ctx, op); return JS_ThrowTypeError(ctx, "host.rpc: bad arg"); }
+
+    /* create a Promise */
+    JSValue resolving[2] = { JS_UNDEFINED, JS_UNDEFINED };
+    JSValue promise = JS_NewPromiseCapability(ctx, resolving);
+    if (JS_IsException(promise)) { JS_FreeCString(ctx, op); JS_FreeCString(ctx, arg_json); return promise; }
+
+    /* enqueue: payload = "op\narg_json" (newline-delimited for easy parsing) */
+    size_t op_len = strlen(op);
+    size_t arg_len = strlen(arg_json);
+    size_t plen = op_len + 1 + arg_len;
+    char *payload = malloc(plen + 1);
+    if (!payload) { JS_FreeCString(ctx, op); JS_FreeCString(ctx, arg_json); JS_FreeValue(ctx, promise); JS_FreeValue(ctx, resolving[0]); JS_FreeValue(ctx, resolving[1]); return JS_ThrowInternalError(ctx, "oom"); }
+    memcpy(payload, op, op_len);
+    payload[op_len] = '\n';
+    memcpy(payload + op_len + 1, arg_json, arg_len);
+    payload[plen] = '\0';
+    JS_FreeCString(ctx, op);
+    JS_FreeCString(ctx, arg_json);
+
+    uint64_t id = mlqjs_host_queue_push(&q->requests, "host.rpc", payload, plen);
+    if (id == 0) { JS_FreeValue(ctx, promise); JS_FreeValue(ctx, resolving[0]); JS_FreeValue(ctx, resolving[1]); return JS_ThrowInternalError(ctx, "queue full"); }
+
+    if (!promise_insert(ctx, resolving[0], resolving[1], id))
+        return JS_ThrowInternalError(ctx, "promise table full");
+
+    return promise;
+}
+
+/* install the host object with host.later() and host.rpc() */
 static void mlqjs_install_host_obj(JSContext *ctx)
 {
     JSValue host = JS_NewObject(ctx);
     JSValue later_fn = JS_NewCFunction(ctx, mlqjs_host_later, "later", 1);
+    JSValue rpc_fn = JS_NewCFunction(ctx, mlqjs_host_rpc, "rpc", 2);
     JS_SetPropertyStr(ctx, host, "later", later_fn);
+    JS_SetPropertyStr(ctx, host, "rpc", rpc_fn);
     JSValue global = JS_GetGlobalObject(ctx);
     JS_SetPropertyStr(ctx, global, "host", host);
     JS_FreeValue(ctx, global);

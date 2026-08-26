@@ -74,6 +74,10 @@ let eval_int t src =
   try Ok (Qjs_handle.eval_int t src)
   with Failure msg -> Error (Engine msg)
 
+let eval_string t src =
+  try Ok (Qjs_handle.eval_string t src)
+  with Failure msg -> Error (Engine msg)
+
 let set_module t path src =
   Qjs_handle.set_module t (Ids.Module_path.to_string path) src
 
