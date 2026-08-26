@@ -1,4 +1,0 @@
-(executable
- (name dbg)
- (libraries mirage_lambda.common)
- (flags (:standard -w -27-32)))
