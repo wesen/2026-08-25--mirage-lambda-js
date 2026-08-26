@@ -10,13 +10,12 @@
  (enabled_if (= %{context_name} "solo5"))
  (name main)
  (modes (native exe))
- (libraries arp.mirage chamelon.kv charrua-client.mirage cmdliner-stdlib
-   cohttp-mirage conduit-mirage duration ethernet logs lwt
-   mirage-block-solo5 mirage-bootvar mirage-bootvar.solo5
-   mirage-crypto-rng-mirage mirage-kv mirage-kv-mem mirage-logs
-   mirage-mtime mirage-mtime.solo5 mirage-net-solo5 mirage-ptime
-   mirage-ptime.solo5 mirage-runtime mirage-runtime.network mirage-sleep
-   mirage-sleep.solo5 mirage-solo5 tcpip.icmpv4 tcpip.ipv6
+ (libraries arp.mirage charrua-client.mirage cmdliner-stdlib cohttp-mirage
+   conduit-mirage duration ethernet logs lwt mirage-bootvar
+   mirage-bootvar.solo5 mirage-crypto-rng-mirage mirage-kv mirage-kv-mem
+   mirage-logs mirage-mtime mirage-mtime.solo5 mirage-net-solo5
+   mirage-ptime mirage-ptime.solo5 mirage-runtime mirage-runtime.network
+   mirage-sleep mirage-sleep.solo5 mirage-solo5 tcpip.icmpv4 tcpip.ipv6
    tcpip.stack-direct tcpip.tcp tcpip.udp yojson)
  (link_flags :standard -w -70 -cclib "-z solo5-abi=hvt")
  (modules (:standard \ config manifest))
