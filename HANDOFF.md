@@ -29,57 +29,47 @@ Delivery is staged into 11 phase-gated phases (0–10).
 | 2 — QuickJS embedding | ✅ done | Real engine: create/eval/module-loader/async-Promise/limits/interrupt/rejection; **9/11 §34.2 probe steps proven** (12 engine tests) |
 | 3 — Unix worker runtime | ✅ done | invocation, capability broker, host fakes, dispatch loop, end-to-end test |
 | 4 — Single-appliance MVP | ✅ done | control plane (HTTP server) + CLI; end-to-end deploy→alias→invoke demoed |
-| 5 — Mirage control-plane unikernel | 🟡 in progress | config + boot functor written; HVT toolchain unblocked; **HVT image not yet built** (see below) |
+| 5 — Mirage control-plane unikernel | 🟡 in progress | config + boot functor; HVT toolchain unblocked; **HVT image BUILDS** (`dist/mirage-lambda-control.hvt`, 13.9 MB; solo5 manifest = one NET_BASIC device); boot not yet run (needs a TAP device → CAP_NET_ADMIN) |
 | 6–10 | not started | worker HVT, fleet, security, hardening, production |
 
 **Tests:** 31 green (14 common + 4 qjs + 12 engine + 1 worker) on the Unix
 (Coq) switch. The control-unikernel builds under the `mirage-lambda` switch.
 
-## The one thing blocking the HVT image (your starting point)
+## Where the HVT image stands now (was: the blocking issue)
 
-The HVT build now reaches the final unikernel-functor type-check and fails
-there. Everything upstream (lockfile, duniverse, Zarith/cohttp cross-compile)
-works. The remaining issue is a **functor signature mismatch** in
-`control-unikernel/unikernel.ml`:
+**The image builds.** The `cohttp_server` functor-arg mismatch is fixed. The
+root cause: `Mirage_runtime.register_arg` returns `int runtime_arg = unit ->
+int`, but `Conduit_mirage.server = [ `TCP of int | ... ]` needs a plain `int`.
+The fix is one token — evaluate the thunk:
 
-```
-File "mirage/main.ml", line 353:
-Error: This expression has type
-         Conduit_mirage.server -> Cohttp_mirage_server_make__26.t -> unit Lwt.t
-       but an expression was expected of type
-         [> `TCP of unit -> int ] -> Cohttp_mirage_server_make__26.t -> unit Lwt.t
+```ocaml
+let serve () = http (`TCP (port ())) httpd   (* was: `TCP port *)
 ```
 
-**Cause:** the `cohttp_server` device (in `config.ml`) passes
-`Cohttp_mirage.Server.Make(Conduit)` as the `Http` functor argument. That
-module's `listen` has type `Conduit_mirage.server -> t -> unit Lwt.t`, but the
-conduit produced by `conduit_direct ~tls:false stack` uses a `unit -> int`
-port-thunk for the `` `TCP `` variant (a runtime arg), so the generated
-`main.ml` expects `[> `TCP of unit -> int ] -> ...`. My functor arg type
-`Cohttp_mirage.Server.S` doesn't include `listen`/`make`, so the wiring
-type-mismatches.
+`make build` now produces `dist/mirage-lambda-control.hvt` (13,955,336 bytes;
+`solo5-elftool query-manifest` reports one NET_BASIC device named `service`).
 
-**Two ways to fix it (pick one):**
+## The remaining gate: boot the image (§34.2 step 10)
 
-1. **Take the made-module signature as the functor arg.** Instead of
-   `Http : Cohttp_mirage.Server.S`, take the result signature of
-   `Cohttp_mirage.Server.Make(Conduit)` — i.e. a module type that includes
-   `listen` and `make` with the `unit -> int` port-thunk. This is what the
-   device actually passes.
+The boot needs a TAP network device on the host, which requires
+`CAP_NET_ADMIN` (or `sudo`):
 
-2. **Build the server inside the unikernel (the ocaml-tls pattern).** Drop
-   `Http` as a functor arg; take the conduit/flow instead, and construct
-   `module Http = Cohttp_mirage.Server.Make(Conduit)` inside `unikernel.ml`,
-   then `Http.listen httpd (`TCP port)`. Reference:
-   `control-unikernel/duniverse/ocaml-tls/mirage/example2/unikernel.ml` does
-   exactly this (it builds `Cohttp_mirage.Server(TLS)` inside and calls
-   `Http.listen t tls`).
+```bash
+opam switch set mirage-lambda && eval $(opam env)
+cd control-unikernel
+sudo ip tuntap add tap100 mode tap && sudo ip link set tap100 up
+sudo ip addr add 10.0.0.1/24 dev tap100          # give the host an address
+solo5-hvt --net:service=tap100 dist/mirage-lambda-control.hvt --port=8080
+# in another shell, once the unikernel prints its IPv4:
+curl http://<unikernel-ip>:8080/healthz   # → {"status":"ok"}
+```
 
-Either way, once the functor type-checks, `make build` (or
-`dune build --profile release --root . ./dist` under the mirage-lambda switch)
-produces `dist/mirage-lambda-control.hvt`, and `solo5-hvt
-dist/mirage-lambda-control.hvt` boots it — closing §34.2 step 10, the only
-open probe gate.
+The dev machine lacks `CAP_NET_ADMIN` (`ip tuntap add` → `Operation not
+permitted`; `sudo -n` needs a password), so the boot could not be run in this
+session. This is a host-permission gate, not a code gate — the image is valid.
+
+If the unikernel does not acquire an IP via DHCP, pass a static IPv4 via
+`--ipv4=<addr>/<mask>` (the `generic_stackv4v6` device accepts it).
 
 ## How to build / run (the two switches)
 
@@ -177,15 +167,13 @@ mirage-lambda-cli invoke default echo prod -e '{"hello":"world"}'
 
 1 ✅ create/destroy · 2 ✅ eval 1+2 · 3 ✅ two-module import · 4 ✅ async handler ·
 5 ✅ host Promise settle · 6 ✅ heap OOM · 7 ✅ stack limit · 8 ✅ interrupt ·
-9 ✅ unhandled rejection · **10 ❌ HVT boot (your first goal)** · 11 ✅ 10k ASan cycles.
+9 ✅ unhandled rejection · **10 🟡 HVT image built, boot pending a TAP device** · 11 ✅ 10k ASan cycles.
 
 ## Your first-day checklist
 
-1. Reproduce the build: `opam switch set mirage-lambda && cd control-unikernel && make build` — confirm you see the functor type error above.
-2. Read `duniverse/ocaml-tls/mirage/example2/unikernel.ml` (the conduit-built-inside pattern).
-3. Fix `unikernel.ml`'s functor (option 1 or 2 above) so `make build` produces `dist/mirage-lambda-control.hvt`.
-4. `solo5-hvt dist/mirage-lambda-control.hvt --net=...` and confirm `/healthz` responds → §34.2 step 10 closed.
-5. Then: wire Chamelon (§39.2 step 4), TLS (step 2), the KV-backed registry (step 3).
+1. Boot the image (needs root): create a TAP device, `solo5-hvt --net:service=tap100 dist/mirage-lambda-control.hvt --port=8080`, curl `/healthz` → §34.2 step 10 closed.
+2. If the build needs reproducing: `opam switch set mirage-lambda && cd control-unikernel && make build`.
+3. Then: wire Chamelon (§39.2 step 4), TLS (step 2), the KV-backed registry (step 3).
 
 ## Project working rule
 

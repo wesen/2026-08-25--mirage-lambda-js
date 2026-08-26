@@ -747,3 +747,42 @@ remains for the next engineer.
 ### Code review instructions
 - Read `HANDOFF.md` at the repo root for the full continuation guide.
 - The remaining fix is a functor signature: either take the `Server.Make(Conduit)` result signature (with `listen`) as the arg, or build `Cohttp_mirage.Server.Make` inside the unikernel from a conduit arg (the ocaml-tls example pattern at `duniverse/ocaml-tls/mirage/example2/unikernel.ml`).
+
+## Step 12: HVT image builds (cohttp_server functor arg fixed)
+
+This step fixes the unikernel functor-arg type mismatch that blocked the HVT
+image, produces `dist/mirage-lambda-control.hvt`, and identifies the final
+remaining gate as a host-level TAP-device permission, not a code issue.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Continue" (then "reload the design doc and diary and all that to stay afresh,")
+
+**Assistant interpretation:** Continue the Phase 5 code work — fix the `cohttp_server` functor arg so `make build` produces the HVT image, then boot it.
+
+### What I did
+- Re-read the diary Step 11, the generated `mirage/main.ml`, the `Conduit_mirage.server` type (`[ `TCP of int | `TLS of ... | `Vchan of ... ]`), and the `cohttp_server` device's connect code (`Lwt.return (Cohttp_mirage_server_make__26.listen _conduit_mirage_tcp__25)`).
+- Root cause: the unikernel passed `` `TCP port `` where `port : int runtime_arg = unit -> int`, so the value was `` `TCP of unit -> int ``, which does not match `Conduit_mirage.server` (`` `TCP of int ``).
+- Fix: `http (`TCP (port ())) httpd` — evaluate the runtime-arg thunk to a plain `int` before constructing the `` `TCP `` variant. One-token change (`port` → `port ()`).
+- `dune build --profile release --root . ./dist` now produces `dist/mirage-lambda-control.hvt` (13,955,336 bytes). `solo5-elftool query-manifest` confirms a valid solo5 manifest: one NET_BASIC device named "service".
+- Updated `.gitignore` to exclude the 13.9 MB build artifact.
+
+### What worked
+- The HVT image builds end-to-end: lockfile → duniverse → solo5 cross-compile → `dist/mirage-lambda-control.hvt`.
+- `solo5-elftool query-manifest` reads the image and reports the declared NET_BASIC device — the image is a valid solo5 HVT binary.
+- Main project tests still 31 green (4 qjs + 14 common + 1 worker + 12 engine).
+
+### What didn't work / remains
+- The actual boot (`solo5-hvt --net:service=tapN dist/mirage-lambda-control.hvt --port=8080`) needs a TAP interface on the host. `ip tuntap add tap100 mode tap` fails with `ioctl(TUNSETIFF): Operation not permitted` — no CAP_NET_ADMIN, and `sudo -n` needs a password. This is a host-permission gate, not a code gate.
+
+### What was tricky to build
+- Diagnosing the polymorphic-variant mismatch: the error "expected `[> `TCP of unit -> int ]`" looked like a functor-signature issue, but the real cause was that `Mirage_runtime.register_arg` returns `int runtime_arg = unit -> int`, and `` `TCP `` of `Conduit_mirage.server` takes a plain `int`. The `unit -> int` thunk had to be evaluated. The ocaml-tls example avoided this because it used a literal port `4433`, not a runtime arg.
+
+### What warrants a second pair of eyes
+- The unikernel builds the server on `Lwt.choose [ serve (); Stack.listen stack ]`. If `serve` exits early (e.g. the listen fails), the choose may not keep the unikernel alive. Confirm the boot actually serves /healthz once a TAP device exists.
+- The runtime-arg port default is 8080; confirm `--port=N` is plumbed by `Mirage_runtime.register_arg` + the solo5 command line (`--port=N` after the kernel).
+
+### Code review instructions
+- `control-unikernel/unikernel.ml` line 56: `` http (`TCP (port ())) httpd ``.
+- Build: `opam switch set mirage-lambda && cd control-unikernel && dune build --profile release --root . ./dist` → `dist/mirage-lambda-control.hvt`.
+- Verify the image: `solo5-elftool query-manifest dist/mirage-lambda-control.hvt`.

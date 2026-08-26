@@ -103,3 +103,12 @@ Phase 5 HVT toolchain unblocked (opam-monorepo default-switch fix; lockfile 92 e
 
 - /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/control-unikernel/unikernel.ml — Boot functor /healthz
 
+
+## 2026-08-25
+
+Phase 5: HVT image builds (cohttp_server functor arg fixed; `TCP (port ())` evaluates the runtime-arg thunk to match Conduit_mirage.server [TCP of int]); dist/mirage-lambda-control.hvt (13.9 MB, solo5 manifest NET_BASIC 'service'); boot gated on host TAP device (CAP_NET_ADMIN)
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/control-unikernel/unikernel.ml — functor arg fix line 56
+
