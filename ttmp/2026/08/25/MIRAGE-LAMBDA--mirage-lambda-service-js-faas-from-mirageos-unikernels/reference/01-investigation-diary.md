@@ -640,3 +640,78 @@ Phase 3 is where the engine meets the service semantics. The dispatch loop (§23
 - `host.rpc(op, arg)` C callback: `JS_NewPromiseCapability` + `JS_JSONStringify(arg)` + enqueue "op\narg_json" + promise table insert.
 - `mlqjs_eval_string`: `JS_Eval` → `JS_ToCString` → `caml_copy_string`.
 - Dispatch loop: pump → take_requests → broker.dispatch → resolve → pump → check `__done` → `JSON.stringify(__result)`.
+
+## Step 9: Mirage switch + missing-symbol audit + Phase 4 MVP
+
+This step creates the dedicated `mirage-lambda` opam switch (closing the
+infrastructure gate), runs the §34.3 missing-symbol audit against the vendored
+QuickJS engine core, implements the Phase 4 single-appliance control plane
+(artifact store, registry, admission, scheduler, worker pool, HTTP server) and
+developer CLI, and demonstrates the §38.2 end-to-end flow: deploy → alias →
+sync/async invoke on Unix.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Ok, then do it, then continue P4-5"
+
+**Assistant interpretation:** Create the Mirage switch, then implement Phases 4 and 5.
+
+**Inferred user intent:** Close the HVT gate and deliver the Unix MVP, then begin the Mirage port.
+
+### What I did
+- Created opam switch `mirage-lambda` (4.14.2): mirage 4.11.2, ocaml-solo5 0.8.5, solo5 0.12.0 (with solo5-hvt tender), tls, cohttp, chamelon — all installed.
+- Ran the §34.3 missing-symbol audit: compiled the 5 engine objects, extracted undefined symbols, classed each. Finding: excluding quickjs-libc.c removes dlopen/process/POSIX; pthread is gated by CONFIG_ATOMICS (compile out + JS_SetCanBlock false); gettimeofday/localtime via §21.4 platform shim + exclude Date; math via target libm; mem/string/stdlib via ocaml-solo5 nolibc. No engine patch needed.
+- Wrote `docs/quickjs-port-audit.md` with the full audit table and decisions.
+- Installed cohttp + cohttp-lwt-unix + lwt into the current (Coq) switch for Phase 4.
+- Implemented `control/artifact_store.{ml,mli}`: content-addressed Unix-directory store, re-verifies digest on ingest and read.
+- Implemented `control/registry.{ml,mli}`: in-memory revision registry + alias with CAS precondition, checkpoint serialization.
+- Implemented `control/admission.{ml,mli}`: tenant quotas (rate, concurrency, queue size, bytes).
+- Implemented `control/scheduler.{ml,mli}`: FIFO with deterministic next_assignment.
+- Implemented `control/worker_pool.{ml,mli}`: in-process runtimes, per-invocation engine.
+- Implemented `control/mirage_lambda_control.ml`: cohttp-lwt-unix HTTP server with /healthz, deploy (POST), alias (PUT), invoke, invoke-async — bearer-token auth.
+- Implemented `cli/mirage_lambda_cli.ml`: bundle/deploy/invoke/alias commands.
+- Demonstrated end-to-end: bundle echo.mlb → deploy (sha256:5ebae7c8...) → alias prod → sync invoke returns {"echoed":{"hello":"world"},"invocationId":"inv-1"} → async invoke returns {"invocationId":"inv-2"}.
+
+### Why
+Phase 4 is the functional MVP gate (§38.3): deployment and invocation usable through the CLI, quota overload returns documented status, recovery tests cover persistence. The Mirage switch + audit close the infrastructure gate for Phases 5-6.
+
+### What worked
+- End-to-end deploy→alias→invoke on Unix works synchronously and asynchronously.
+- The §34.3 audit found no blocking symbols — the engine core is portable with CONFIG_ATOMICS compiled out.
+- All 31 prior tests still green after adding the control plane + CLI.
+
+### What didn't work
+- `opam switch create ... --empty` conflicts with packages; used `opam switch create mirage-lambda 4.14.2` (no --empty) then a separate install.
+- cohttp-lwt's `.cmi` was corrupt on first install; `opam reinstall cohttp-lwt` fixed it.
+- cohttp-lwt-unix Server.create mode is `Conduit_lwt_unix.server` = `` `TCP of tcp_config `` where `tcp_config = `Port of int`` (not a (addr,port) tuple); the callback is curried (not a tuple); respond_string takes `()`.
+- `Unix.mkdir` doesn't create nested dirs; fixed `ensure_dir` to recurse (mkdir -p).
+- `Revision_id.t` and `Digest.t` didn't unify through `include module type of Digest` (private); made `type t = Digest.t` explicit in the .mli.
+
+### What I learned
+- The cohttp-lwt-unix server API: `Server.make ~callback ()` then `Server.create ~mode httpd`, with mode `` `TCP (`Port port) ``; the callback is `conn -> Request.t -> Body.t -> (Response.t * Body.t) Lwt.t`.
+- The §34.3 audit's value: it turned "it compiles on Unix" into a concrete portability decision (compile out CONFIG_ATOMICS, shim wall-time) before any HVT build.
+- QuickJS's pthread dependence is entirely behind CONFIG_ATOMICS (the Atomics.wait/notify waiter + class-id mutex); a single-threaded worker with JS_SetCanBlock(false) needs none of it.
+
+### What was tricky to build
+- The cohttp-lwt-unix API has several sharp edges (corrupt .cmi, tuple-vs-curried callback, tcp_config shape, respond_string's unit arg); each required a build-fix cycle.
+- Lifting Result into Lwt without unifying the error-response type with the value type: nested `match` statements instead of a `lift_result` helper.
+
+### What warrants a second pair of eyes
+- The CLI uses curl via Sys.command for HTTP (Phase 4 dev simplicity); a real client uses cohttp-lwt.
+- The worker_pool reads `__done`/`__result` for completion (Phase 3 simplification); the §20.1 `Complete` progress is the production form.
+- The dispatch loop's max_turns=100 is a pragmatic cap; the deadline check is the production form.
+- The control plane has no integration tests yet (only the manual e2e demo); the §38.3 gate calls for OpenAPI-driven integration tests + recovery tests.
+
+### What should be done in the future
+- Phase 4 hardening: OpenAPI integration tests, recovery-after-every-persistence-step tests, quota-overload tests.
+- Phase 5: port the control plane to a Mirage unikernel (Chamelon KV + TLS).
+- HVT boot (§34.2 step 10): build a minimal HVT unikernel, boot it, capture digests.
+
+### Code review instructions
+- Start at `control/mirage_lambda_control.ml` (HTTP server), `control/worker_pool.ml` (execution), `cli/mirage_lambda_cli.ml` (CLI).
+- Run the e2e: start `mirage-lambda-control`, then `mirage-lambda-cli bundle/deploy/alias/invoke`.
+- Audit: `docs/quickjs-port-audit.md`.
+
+### Technical details
+- Switch: mirage-lambda (4.14.2), mirage 4.11.2, ocaml-solo5 0.8.5, solo5 0.12.0.
+- MVP revision: sha256:5ebae7c8c6907d4ce0eacdf186e6e82e1972789c9ede81c57bc48d8e5a7f6344.

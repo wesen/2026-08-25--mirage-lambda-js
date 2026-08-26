@@ -76,3 +76,12 @@ Phase 3: Unix worker runtime — invocation context, capability broker, host fak
 
 - /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/worker/runtime_host.ml — Worker dispatch loop (§23.2)
 
+
+## 2026-08-25
+
+Phase 4: single-appliance MVP — control plane (artifact store, registry, admission, scheduler, worker pool, HTTP server) + developer CLI + end-to-end deploy/alias/invoke demo; mirage-lambda switch built + §34.3 audit done
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/control/mirage_lambda_control.ml — HTTP control plane (§9)
+
