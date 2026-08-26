@@ -1,0 +1,6 @@
+(executable
+ (name mirage_lambda_cli)
+ (public_name mirage-lambda-cli)
+ (modules mirage_lambda_cli)
+ (libraries mirage_lambda.common unix yojson)
+ (flags (:standard -w -27-32-34-50-69-70)))

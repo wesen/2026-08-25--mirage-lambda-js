@@ -11,8 +11,13 @@ type t = {
 }
 
 let ensure_dir dir =
-  if not (Sys.file_exists dir) then
-    (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+  (* recursively create the directory (like mkdir -p) *)
+  let rec mk d =
+    if not (Sys.file_exists d) then begin
+      mk (Filename.dirname d);
+      (try Unix.mkdir d 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+    end in
+  mk dir
 
 let make ~root = ensure_dir root; { root }
 
