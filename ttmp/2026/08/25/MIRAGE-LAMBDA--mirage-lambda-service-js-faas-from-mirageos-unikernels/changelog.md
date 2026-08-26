@@ -85,3 +85,12 @@ Phase 4: single-appliance MVP — control plane (artifact store, registry, admis
 
 - /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/control/mirage_lambda_control.ml — HTTP control plane (§9)
 
+
+## 2026-08-25
+
+Phase 5 (start): Mirage control-plane unikernel config.ml + unikernel.ml; mirage configure -t hvt succeeds; HVT build gated on opam-monorepo lockfile (dune-universe overlay)
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/control-unikernel/config.ml — Mirage device composition (§26.1)
+

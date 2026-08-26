@@ -7,7 +7,7 @@
 - [x] P2: QuickJS embedding on Unix — real engine, 9/11 probe steps proven (33 tests green)
 - [x] P3: Unix worker runtime (worker/*, fake capabilities, host API)
 - [x] P4: Single-appliance service on Unix (control/*, CLI, end-to-end MVP)
-- [ ] P5: Mirage control-plane unikernel
+- [x] P5: Mirage control-plane unikernel
 - [ ] P6: Mirage QuickJS worker unikernel (Solo5 HVT)
 - [ ] P7: Fleet orchestration and scheduling
 - [ ] P8: Capability security, egress, and secrets
