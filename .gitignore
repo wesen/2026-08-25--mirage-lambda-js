@@ -13,3 +13,4 @@ build/
 .vscode/
 control-unikernel/duniverse/
 control-unikernel/mirage/
+control-unikernel/dist/

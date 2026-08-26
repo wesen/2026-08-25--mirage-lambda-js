@@ -51,12 +51,13 @@ module Main
     (* construct the HTTP server with our callback *)
     let httpd = Http.make ~callback () in
     (* mirage passes `http = Cohttp_mirage.Server.Make(Conduit).listen conduit`,
-       which has type [Conduit_mirage.server -> t -> unit Lwt.t]. We supply the
-       conduit server (`TCP port) and the httpd. The port is a runtime arg. *)
+       which has type [Conduit_mirage.server -> t -> unit Lwt.t]. Conduit_mirage.server
+       is `[ `TCP of int | `TLS of ... | `Vchan of ... ]`, so we evaluate the
+       runtime-arg port thunk to a plain int and build the `TCP server. *)
     let port = Mirage_runtime.register_arg
       Cmdliner.Arg.(value & opt int 8080 (Cmdliner.Arg.info ["port"] ~doc:"HTTP port"))
     in
-    let serve () = http (`TCP port) httpd in
+    let serve () = http (`TCP (port ())) httpd in
     (* serve HTTP and run the stack concurrently *)
     Lwt.choose [ serve (); Stack.listen stack ]
 end
