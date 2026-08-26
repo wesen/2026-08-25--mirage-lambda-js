@@ -20,3 +20,7 @@ val set_module : t -> string -> string -> unit
 
 (** Evaluate a module entrypoint by path; returns true if exception. *)
 val eval_module : t -> string -> bool
+
+val install_host : t -> unit
+val resolve : t -> int64 -> string -> unit
+val has_unhandled_rejection : t -> bool

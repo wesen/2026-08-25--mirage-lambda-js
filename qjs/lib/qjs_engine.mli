@@ -59,6 +59,15 @@ val set_module : t -> Ids.Module_path.t -> string -> unit
 (** Evaluate a module entrypoint by path; returns true if exception. *)
 val eval_module : t -> Ids.Module_path.t -> bool
 
+(** Install the host.later(x) callback for the Promise bridge (§23.1). *)
+val install_host : t -> unit
+
+(** Resolve a host Promise by request id with a JSON result string. *)
+val resolve : t -> Qjs_host_request.Id.t -> string -> unit
+
+(** Check if an unhandled Promise rejection was observed (§34.2 step 9). *)
+val has_unhandled_rejection : t -> bool
+
 val take_host_requests : t -> Qjs_host_request.t list
 
 val resolve_host_request :

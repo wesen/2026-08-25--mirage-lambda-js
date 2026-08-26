@@ -330,6 +330,152 @@ CAMLprim value mlqjs_eval_module(value v_handle, value v_path)
     caml_failwith("mlqjs_eval_module: entrypoint not found");
 }
 
+/* ---- Promise bridge (§23.1, §34.2 steps 4-5, 9) ----
+ *
+ * A simple host callback `host.later(x)` that creates a Promise, stores the
+ * resolving functions, and enqueues a host request. OCaml drains the queue,
+ * computes the result, and calls mlqjs_resolve to settle the Promise. */
+
+/* promise table: maps request id -> (resolve, reject) JSValues */
+#define MLQJS_MAX_PROMISES 256
+typedef struct {
+    uint64_t id;
+    JSValue resolve;
+    JSValue reject;
+    int in_use;
+} mlqjs_promise_slot;
+
+static mlqjs_promise_slot g_promises[MLQJS_MAX_PROMISES];
+
+static int promise_insert(JSContext *ctx, JSValue resolve, JSValue reject, uint64_t id)
+{
+    for (int i = 0; i < MLQJS_MAX_PROMISES; i++) {
+        if (!g_promises[i].in_use) {
+            g_promises[i].id = id;
+            g_promises[i].resolve = resolve;
+            g_promises[i].reject = reject;
+            g_promises[i].in_use = 1;
+            return 1;
+        }
+    }
+    JS_FreeValue(ctx, resolve);
+    JS_FreeValue(ctx, reject);
+    return 0;  /* table full */
+}
+
+static mlqjs_promise_slot *promise_find(uint64_t id)
+{
+    for (int i = 0; i < MLQJS_MAX_PROMISES; i++)
+        if (g_promises[i].in_use && g_promises[i].id == id)
+            return &g_promises[i];
+    return NULL;
+}
+
+static void promise_remove(JSContext *ctx, mlqjs_promise_slot *s)
+{
+    JS_FreeValue(ctx, s->resolve);
+    JS_FreeValue(ctx, s->reject);
+    s->in_use = 0;
+}
+
+/* the host.later(x) C callback: creates a Promise, enqueues a host request */
+static JSValue mlqjs_host_later(JSContext *ctx, JSValueConst this_val,
+                                int argc, JSValueConst *argv)
+{
+    (void)this_val;
+    if (argc < 1)
+        return JS_ThrowTypeError(ctx, "host.later expects 1 argument");
+    mlqjs_runtime *q = (mlqjs_runtime *)JS_GetContextOpaque(ctx);
+
+    /* extract the argument as a JSON string (for simplicity, use int) */
+    int32_t arg = 0;
+    if (JS_ToInt32(ctx, &arg, argv[0]) != 0)
+        return JS_ThrowTypeError(ctx, "host.later expects an int");
+
+    /* create a Promise and get resolving functions */
+    JSValue resolving[2] = { JS_UNDEFINED, JS_UNDEFINED };
+    JSValue promise = JS_NewPromiseCapability(ctx, resolving);
+    if (JS_IsException(promise))
+        return promise;
+
+    /* enqueue a host request */
+    char payload[32];
+    int plen = snprintf(payload, sizeof(payload), "%d", arg);
+    char *payload_copy = malloc(plen + 1);
+    if (!payload_copy) { JS_FreeValue(ctx, promise); JS_FreeValue(ctx, resolving[0]); JS_FreeValue(ctx, resolving[1]); return JS_ThrowTypeError(ctx, "oom"); }
+    memcpy(payload_copy, payload, plen + 1);
+    uint64_t id = mlqjs_host_queue_push(&q->requests, "host.later", payload_copy, plen);
+    if (id == 0) {
+        JS_FreeValue(ctx, promise);
+        JS_FreeValue(ctx, resolving[0]);
+        JS_FreeValue(ctx, resolving[1]);
+        return JS_ThrowInternalError(ctx, "host request queue full");
+    }
+
+    /* store resolving functions in the promise table */
+    if (!promise_insert(ctx, resolving[0], resolving[1], id))
+        return JS_ThrowInternalError(ctx, "promise table full");
+
+    return promise;
+}
+
+/* install the host object with host.later() */
+static void mlqjs_install_host_obj(JSContext *ctx)
+{
+    JSValue host = JS_NewObject(ctx);
+    JSValue later_fn = JS_NewCFunction(ctx, mlqjs_host_later, "later", 1);
+    JS_SetPropertyStr(ctx, host, "later", later_fn);
+    JSValue global = JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx, global, "host", host);
+    JS_FreeValue(ctx, global);
+}
+
+/* ---- [mlqjs_resolve] : int -> int64 -> string -> unit
+ * Resolve a host Promise by request id with a JSON result string. ---- */
+CAMLprim value mlqjs_resolve(value v_handle, value v_id, value v_result)
+{
+    CAMLparam3(v_handle, v_id, v_result);
+    mlqjs_runtime *q = table_get(v_handle, NULL);
+    if (!q) caml_failwith("mlqjs_resolve: stale handle");
+    uint64_t id = Int64_val(v_id);
+    mlqjs_promise_slot *s = promise_find(id);
+    if (!s) CAMLreturn(Val_unit);  /* stale/unknown id — ignore */
+    /* parse the result as JSON and call the resolve function */
+    const char *json = String_val(v_result);
+    size_t json_len = caml_string_length(v_result);
+    JSValue val = JS_ParseJSON(q->ctx, json, json_len, "<result>");
+    if (JS_IsException(val)) {
+        JSValue err = JS_NewString(q->ctx, "bad result JSON");
+        JS_Call(q->ctx, s->reject, JS_UNDEFINED, 1, &err);
+        JS_FreeValue(q->ctx, err);
+    } else {
+        JSValue ret = JS_Call(q->ctx, s->resolve, JS_UNDEFINED, 1, &val);
+        JS_FreeValue(q->ctx, ret);
+        JS_FreeValue(q->ctx, val);
+    }
+    promise_remove(q->ctx, s);
+    CAMLreturn(Val_unit);
+}
+
+/* ---- [mlqjs_has_unhandled_rejection] : int -> bool (§34.2 step 9) ---- */
+CAMLprim value mlqjs_has_unhandled_rejection(value v_handle)
+{
+    CAMLparam1(v_handle);
+    mlqjs_runtime *q = table_get(v_handle, NULL);
+    if (!q) caml_failwith("mlqjs_has_unhandled_rejection: stale handle");
+    CAMLreturn(Val_bool(q->terminal));
+}
+
+/* ---- [mlqjs_install_host] : int -> unit (install host.later) ---- */
+CAMLprim value mlqjs_install_host(value v_handle)
+{
+    CAMLparam1(v_handle);
+    mlqjs_runtime *q = table_get(v_handle, NULL);
+    if (!q) caml_failwith("mlqjs_install_host: stale handle");
+    mlqjs_install_host_obj(q->ctx);
+    CAMLreturn(Val_unit);
+}
+
 /* ---- [mlqjs_pump] : int -> int -> int ---- */
 CAMLprim value mlqjs_pump(value v_handle, value v_max_jobs)
 {

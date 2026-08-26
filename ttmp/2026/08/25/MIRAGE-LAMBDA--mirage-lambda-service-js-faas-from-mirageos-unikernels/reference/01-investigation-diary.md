@@ -506,3 +506,68 @@ Probe step 3 is the gateway to the async handler (steps 4-5) — the probe.js im
 ### Technical details
 - `JS_SetModuleLoaderFunc(rt, NULL, mlqjs_module_loader, q)` — NULL normalizer = default QuickJS resolver.
 - `JS_Eval(ctx, src, len, name, JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY)` → `JS_VALUE_GET_PTR(val)` → `JS_FreeValue(ctx, val)` → return `JSModuleDef*`.
+
+## Step 7: Promise bridge — async handler (steps 4-5) + unhandled rejection (step 9)
+
+This step implements the §23.1 Promise bridge: a C host callback (`host.later(x)`)
+that creates a Promise via `JS_NewPromiseCapability`, stores the resolving
+functions in a promise table, and enqueues a host request. OCaml drains the
+queue, resolves the Promise with a JSON result, and pumps the job queue to
+settle it. Also tests the unhandled-rejection tracker (step 9). 9 of 11 probe
+steps now proven on Unix (only step 10 — HVT — remains).
+
+### Prompt Context
+
+**User prompt (verbatim):** (see Step 5)
+
+**Assistant interpretation:** Wire the Promise bridge and prove the remaining probe steps.
+
+### What I did
+- Added a promise table (`g_promises[256]`) mapping request id → (resolve, reject) JSValues.
+- Implemented `mlqjs_host_later` (C `JSCFunction`): validates the arg, creates a Promise via `JS_NewPromiseCapability`, enqueues a host request with the arg as payload, stores the resolving functions, returns the Promise.
+- Added `mlqjs_install_host_obj` (installs `host.later` as a global `host` object method) and the `mlqjs_install_host` external.
+- Added `mlqjs_resolve` external: finds the promise by request id, parses the JSON result, calls the stored resolve function via `JS_Call`, frees the resolving functions.
+- Added `mlqjs_has_unhandled_rejection` external (returns the `terminal` flag set by the rejection tracker).
+- Exposed `install_host`/`resolve`/`has_unhandled_rejection` on `qjs_handle` and `qjs_engine`.
+- Added 2 tests: `unhandled rejection (step 9)` (rejected Promise with no catch → tracker fires) and `async handler (steps 4-5)` (`host.later(41)` → OCaml resolves with `"42"` → `.then(x => __result = x)` → `__result` reads back 42).
+
+### Why
+The Promise bridge (§23.1) is the core runtime bridge: "A JavaScript host call queues data in C, returns a Promise, and is completed later by the OCaml scheduler." Proving it end-to-end closes the language-runtime uncertainty (§33 class 1) for the Unix target.
+
+### What worked
+- `host.later(41).then(x => { __result = x; __done = true; })` — the eval enqueues a host request; OCaml drains it, resolves with `"42"`; pump settles the Promise; `__result` reads back 42 and `__done` is true.
+- `new Promise((_, reject) => reject(new Error('boom')))` — the rejection tracker fires (§34.2 step 9), `has_unhandled_rejection` returns true.
+- Full suite: 14 common + 4 qjs + 12 engine + 3 fuzz = 33 tests, all green.
+
+### What didn't work
+- Name collision: both the static C helper and the OCaml external were named `mlqjs_install_host`. Fix: rename the helper to `mlqjs_install_host_obj`.
+- `Qjs_engine.t` is abstract in the `.mli`, so `Qjs_handle` externals can't be called with a `Qjs_engine.t` directly. Fix: expose `install_host`/`resolve`/`has_unhandled_rejection` on `Qjs_engine` (delegating to `Qjs_handle`).
+
+### What I learned
+- `JS_NewPromiseCapability(ctx, resolving)` returns a Promise and fills `resolving[0]` (resolve) and `resolving[1]` (reject) — these are JSValues that must be freed after use (the promise table holds them until settlement).
+- `JS_Call(ctx, resolve_fn, JS_UNDEFINED, 1, &val)` calls the resolve function with the result value; the return value must be freed.
+- `JS_ParseJSON` parses a JSON string into a JSValue — using it for the resolve payload keeps the C side simple (no manual JSValue construction).
+- The rejection tracker (`JS_SetHostPromiseRejectionTracker`) fires synchronously when a rejected Promise has no rejection handler; the `is_handled` parameter is 0 for unhandled.
+
+### What was tricky to build
+- The promise table is a global array (not per-runtime) — fine for single-threaded use (§22.1: OCaml drives C, no foreign threads), but must be documented as a limitation for multi-runtime tests.
+- The `JS_Call` to the resolve function must happen while holding the OCaml runtime lock (we're in a C primitive called from OCaml), which is the correct state — no runtime lock release needed.
+
+### What warrants a second pair of eyes
+- The promise table (`g_promises`) is a global, not per-runtime — if two runtimes are alive simultaneously and both use the Promise bridge, their promises share the same table. For the worker (one invocation at a time) this is fine, but it should be per-runtime for safety.
+- `JS_FreeValue` on the resolve/reject functions in `promise_remove` must happen exactly once per promise — a double-free or use-after-free would be a serious bug.
+- The `host.later` callback extracts the arg as an int via `JS_ToInt32`; the general case needs canonical JSON (§23.4).
+
+### What should be done in the future
+- Move the promise table per-runtime (into `mlqjs_runtime`).
+- Implement the full `host.later` with canonical JSON args (not just int).
+- Implement `mlqjs_reject` (reject a host Promise with an error).
+- Run the full 100k-cycle ASan evidence run (§34.2 step 11).
+- Create the Mirage/Solo5 switch for step 10 (HVT).
+
+### Code review instructions
+- Start at `qjs/c/qjs_stubs.c` (`mlqjs_host_later`, `mlqjs_resolve`, `mlqjs_install_host_obj`, promise table) and `test/unit/test_qjs_engine.ml` (`test_async_handler`, `test_unhandled_rejection`).
+- Run `eval $(opam env) && dune runtest --force` — expect 33 tests green.
+
+### Technical details
+- Probe steps proven on Unix: 1 (create/destroy), 2 (eval 1+2), 3 (two-module import), 4 (async handler), 5 (host Promise settle), 6 (heap OOM), 7 (stack limit), 8 (interrupt), 9 (unhandled rejection), 11 (10k cycles). Only step 10 (HVT boot) remains.

@@ -35,3 +35,12 @@ external set_module : t -> string -> string -> unit = "mlqjs_set_module"
 
 (* Evaluate a module entrypoint by path; returns true if exception. *)
 external eval_module : t -> string -> bool = "mlqjs_eval_module"
+
+(* Install the host.later(x) callback for the Promise bridge (§23.1). *)
+external install_host : t -> unit = "mlqjs_install_host"
+
+(* Resolve a host Promise by request id with a JSON result string. *)
+external resolve : t -> int64 -> string -> unit = "mlqjs_resolve"
+
+(* Check if an unhandled Promise rejection was observed (§34.2 step 9). *)
+external has_unhandled_rejection : t -> bool = "mlqjs_has_unhandled_rejection"

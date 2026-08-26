@@ -161,6 +161,51 @@ let test_module_not_found () =
     Qjs_engine.destroy t
   | Error _ -> Alcotest.fail "create failed"
 
+(* §34.2 step 9: receive an unhandled Promise rejection through the rejection tracker. *)
+let test_unhandled_rejection () =
+  match Qjs_engine.create ~limits:default_limits ~bundle:dummy_bundle with
+  | Ok t ->
+    (* create a rejected Promise with no .catch — the rejection tracker should fire *)
+    let _ = Qjs_engine.eval t "new Promise((_, reject) => reject(new Error('boom')))" in
+    (* pump any pending jobs so the rejection is processed *)
+    let _ = Qjs_engine.pump t ~max_jobs:64 in
+    Alcotest.(check bool) "unhandled rejection detected" true (Qjs_engine.has_unhandled_rejection t);
+    Qjs_engine.destroy t
+  | Error _ -> Alcotest.fail "create failed"
+
+(* §34.2 steps 4-5: call an async handler, create a host Promise, settle it from OCaml. *)
+let test_async_handler () =
+  match Qjs_engine.create ~limits:default_limits ~bundle:dummy_bundle with
+  | Ok t ->
+    Qjs_engine.install_host t;
+    (* evaluate an async handler that calls host.later(x) and awaits the result *)
+    let src = "globalThis.__done = false; host.later(41).then(x => { globalThis.__result = x; globalThis.__done = true; });" in
+    let threw = Qjs_engine.eval t src in
+    Alcotest.(check bool) "async eval does not throw" false threw;
+    (* the eval queued a host request; drain it *)
+    let requests = Qjs_engine.take_host_requests t in
+    Alcotest.(check int) "one host request" 1 (List.length requests);
+    (match requests with
+     | req :: _ ->
+       (* the payload is "41" (the argument); resolve with 42 *)
+       let id = req.Qjs_host_request.id in
+       let payload = Bounded_bytes.to_string req.Qjs_host_request.payload in
+       Alcotest.(check string) "payload is 41" "41" payload;
+       (* resolve the Promise with JSON 42 *)
+       Qjs_engine.resolve t id "42";
+       (* pump to settle the Promise and run the .then callback *)
+       let _ = Qjs_engine.pump t ~max_jobs:64 in
+       (* verify the handler completed *)
+       (match Qjs_engine.eval_int t "__result" with
+        | Ok n -> Alcotest.(check int) "resolved to 42" 42 n
+        | Error _ -> Alcotest.fail "could not read __result");
+       (match Qjs_engine.eval_int t "__done ? 1 : 0" with
+        | Ok n -> Alcotest.(check int) "done flag set" 1 n
+        | Error _ -> Alcotest.fail "could not read __done")
+     | [] -> Alcotest.fail "no host request");
+    Qjs_engine.destroy t
+  | Error _ -> Alcotest.fail "create failed"
+
 let tests = [
   "engine", [
     Alcotest.test_case "create/destroy x100" `Slow test_create_destroy;
@@ -173,6 +218,8 @@ let tests = [
     Alcotest.test_case "pump jobs" `Quick test_pump_jobs;
     Alcotest.test_case "module loader (step 3)" `Quick test_module_loader;
     Alcotest.test_case "module not found" `Quick test_module_not_found;
+    Alcotest.test_case "unhandled rejection (step 9)" `Quick test_unhandled_rejection;
+    Alcotest.test_case "async handler (steps 4-5)" `Quick test_async_handler;
   ];
 ]
 

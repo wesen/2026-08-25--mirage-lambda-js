@@ -58,3 +58,12 @@ Module loader wired (§34.2 step 3): two-module ESM import works; set_module/eva
 
 - /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/qjs/c/qjs_stubs.c — C module loader callback (§24.4)
 
+
+## 2026-08-25
+
+Promise bridge (§23.1): host.later async handler + resolve + unhandled rejection tracker; 9/11 probe steps proven on Unix; 33 tests green
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-08-25--mirage-lambda-js/qjs/c/qjs_stubs.c — Promise bridge + host callback
+

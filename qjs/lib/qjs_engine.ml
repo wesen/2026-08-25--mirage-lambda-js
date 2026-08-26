@@ -80,6 +80,10 @@ let set_module t path src =
 let eval_module t path =
   Qjs_handle.eval_module t (Ids.Module_path.to_string path)
 
+let install_host t = Qjs_handle.install_host t
+let resolve t id json = Qjs_handle.resolve t (Qjs_host_request.Id.to_int64 id) json
+let has_unhandled_rejection t = Qjs_handle.has_unhandled_rejection t
+
 (* Pump up to max_jobs pending jobs. Returns a progress hint. *)
 let pump t ~max_jobs =
   (try
